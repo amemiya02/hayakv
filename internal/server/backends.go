@@ -42,7 +42,14 @@ func NewStorageEngine(cfg *config.ServerProperties) (iface.StorageEngine, error)
 	case EngineShardMap:
 		return database.NewStandaloneServer(), nil
 	case EngineRedisDB:
-		return nil, fmt.Errorf("engine backend %q is M2 scope", cfg.EngineBackend)
+		inner := database.NewStandaloneServer()
+		// For goroutine backend, wrap with a global lock since
+		// redisdb uses a single non-sharded dict.
+		if cfg.NetBackend == NetGoroutine {
+			return NewLockedEngine(inner), nil
+		}
+		// For eventloop (future), locking is external.
+		return inner, nil
 	default:
 		return nil, fmt.Errorf("unknown engine backend %q", cfg.EngineBackend)
 	}
