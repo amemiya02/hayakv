@@ -42,6 +42,10 @@ func readReply(r *bufio.Reader) ([]byte, error) {
 	switch prefix {
 	case '+', '-', ':':
 		return out, nil
+	case '_': // RESP3 null
+		return out, nil
+	case '#', ',', '(': // RESP3 bool, double, bignum
+		return out, nil
 	case '$':
 		n, err := strconv.Atoi(strings.TrimSpace(string(line)))
 		if err != nil {
@@ -55,7 +59,17 @@ func readReply(r *bufio.Reader) ([]byte, error) {
 			return nil, err
 		}
 		return append(out, payload...), nil
-	case '*':
+	case '=': // RESP3 verbatim string
+		n, err := strconv.Atoi(strings.TrimSpace(string(line)))
+		if err != nil {
+			return nil, err
+		}
+		payload := make([]byte, n+2)
+		if _, err := io.ReadFull(r, payload); err != nil {
+			return nil, err
+		}
+		return append(out, payload...), nil
+	case '*', '%', '~', '>': // array, map, set, push
 		n, err := strconv.Atoi(strings.TrimSpace(string(line)))
 		if err != nil {
 			return nil, err
@@ -63,7 +77,11 @@ func readReply(r *bufio.Reader) ([]byte, error) {
 		if n < 0 {
 			return out, nil
 		}
-		for i := 0; i < n; i++ {
+		count := n
+		if prefix == '%' { // map: n means n key-value pairs = 2n elements
+			count = n * 2
+		}
+		for i := 0; i < count; i++ {
 			child, err := readReply(r)
 			if err != nil {
 				return nil, err
@@ -124,6 +142,10 @@ func projectRoot(t *testing.T) string {
 }
 
 func startHayakv(t *testing.T) (string, func()) {
+	return startHayakvProto(t, "resp2")
+}
+
+func startHayakvProto(t *testing.T, proto string) (string, func()) {
 	t.Helper()
 	root := projectRoot(t)
 	tmp := t.TempDir()
@@ -141,8 +163,8 @@ dir %s
 databases 16
 net goroutine
 engine shardmap
-proto-max resp2
-`, port, tmp)), 0o644); err != nil {
+proto-max %s
+`, port, tmp, proto)), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -220,6 +242,33 @@ func runScenario(t *testing.T, addr string, scenario Scenario) [][]byte {
 		replies = append(replies, reply)
 	}
 	return replies
+}
+
+func TestM1DifferentialRESP3(t *testing.T) {
+	hayakvAddr, stopHayakv := startHayakvProto(t, "resp3")
+	defer stopHayakv()
+	redisAddr, stopRedis := startRedis8(t)
+	defer stopRedis()
+
+	hello := Command{Args: []string{"HELLO", "3"}}
+	for _, scenario := range m1Corpus() {
+		scenario := scenario
+		t.Run(scenario.Name, func(t *testing.T) {
+			withHello := Scenario{Name: scenario.Name,
+				Commands: append([]Command{hello}, scenario.Commands...)}
+			h := runScenario(t, hayakvAddr, withHello)[1:] // drop HELLO reply (server/version differ)
+			r := runScenario(t, redisAddr, withHello)[1:]
+			if len(h) != len(r) {
+				t.Fatalf("reply count h=%d r=%d", len(h), len(r))
+			}
+			for i := range h {
+				if !bytes.Equal(h[i], r[i]) {
+					t.Fatalf("cmd %v\nhayakv: %q\nredis:  %q",
+						scenario.Commands[i].Args, h[i], r[i])
+				}
+			}
+		})
+	}
 }
 
 func TestM0DifferentialRESP2(t *testing.T) {
