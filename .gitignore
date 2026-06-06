@@ -34,6 +34,7 @@ node3/
 .omc/
 .claude/
 docs/superpowers/
+.codegraph/
 
 # Misc
 redis2.conf
