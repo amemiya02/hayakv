@@ -111,6 +111,10 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 	GodisExecCommandStartUnixTime := time.Now()
 
 	cmdName := strings.ToLower(string(cmdLine[0]))
+	// hello (must run before auth — clients send HELLO first)
+	if cmdName == "hello" {
+		return execHello(c, cmdLine[1:])
+	}
 	// ping
 	if cmdName == "ping" {
 		return Ping(c, cmdLine[1:])
