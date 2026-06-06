@@ -100,7 +100,7 @@ func (s *Server) Run(ctx context.Context, addr string, handler iface.NetHandler)
 			if !ok {
 				continue
 			}
-			if ev.readable {
+			if ev.readable && c.blockKeys == nil {
 				s.onReadable(c)
 			}
 			if ev.writable && c.bc.hasOut() {
@@ -215,6 +215,24 @@ func (s *Server) onReadable(c *client) {
 				c.bc.Write(encoded)
 			}
 		}
+
+		// Blocking command integration: if BLPOP/BRPOP returned null
+		// (empty list), register the client as a waiter.
+		cmdName := strings.ToLower(string(cmdLine[0]))
+		if isBlockCommand(cmdName) && reply != nil && isNullReply(reply) {
+			// Remove the null reply we just buffered — client will wait.
+			c.bc.takeOut()
+			keys := extractBlockKeys(cmdLine)
+			c.blockKeys = keys
+			s.blocks.block(c, keys)
+			break // stop processing further pipelined commands
+		}
+
+		// After list-modifying commands, wake blocked waiters.
+		if isListPushCommand(cmdName) && len(cmdLine) >= 2 {
+			pushKey := string(cmdLine[1])
+			s.wakeBlockedClients(pushKey)
+		}
 	}
 
 	if c.bc.hasOut() {
@@ -307,5 +325,73 @@ func sockaddrString(sa unix.Sockaddr) string {
 // Ensure Server implements iface.NetServer.
 var _ iface.NetServer = (*Server)(nil)
 
-// unused suppresses lint for imported strings.
-var _ = strings.TrimSpace
+// --- Blocking command helpers ---
+
+func isBlockCommand(name string) bool {
+	return name == "blpop" || name == "brpop"
+}
+
+func isListPushCommand(name string) bool {
+	return name == "lpush" || name == "rpush"
+}
+
+func isNullReply(reply interface{}) bool {
+	if reply == nil {
+		return true
+	}
+	// Check for RESP2 null bulk ("$-1\r\n") or RESP3 null ("_\r\n")
+	if b, ok := reply.(interface{ ToBytes() []byte }); ok {
+		raw := b.ToBytes()
+		return string(raw) == "$-1\r\n" || string(raw) == "_\r\n" || string(raw) == "*-1\r\n"
+	}
+	return false
+}
+
+func extractBlockKeys(cmdLine [][]byte) []string {
+	// BLPOP key1 key2 ... timeout — keys are args[1..n-1], last arg is timeout
+	if len(cmdLine) < 3 {
+		return nil
+	}
+	keys := make([]string, 0, len(cmdLine)-2)
+	for i := 1; i < len(cmdLine)-1; i++ {
+		keys = append(keys, string(cmdLine[i]))
+	}
+	return keys
+}
+
+// wakeBlockedClients checks if any client is blocked on pushKey and retries
+// their BLPOP/BRPOP. If the list now has elements, the client gets a reply
+// and is unblocked.
+func (s *Server) wakeBlockedClients(pushKey string) {
+	waiters := s.blocks.waiters(pushKey)
+	if len(waiters) == 0 {
+		return
+	}
+	// Copy the list since unblock modifies it.
+	pending := make([]*client, len(waiters))
+	copy(pending, waiters)
+
+	for _, c := range pending {
+		// Re-issue the blocking command. If the list now has elements,
+		// the engine will return a real reply.
+		blockCmd := make([][]byte, 0, len(c.blockKeys)+2)
+		blockCmd = append(blockCmd, []byte("BLPOP"))
+		for _, k := range c.blockKeys {
+			blockCmd = append(blockCmd, []byte(k))
+		}
+		blockCmd = append(blockCmd, []byte("0")) // timeout 0 = already checked
+
+		reply := s.engine.Exec(c.conn, blockCmd)
+		if reply != nil && !isNullReply(reply) {
+			// Got an element — send reply and unblock.
+			encoded := s.codec.Encode(reply, c.conn.Protocol())
+			if len(encoded) > 0 {
+				c.bc.Write(encoded)
+			}
+			s.blocks.unblock(c)
+			c.blockKeys = nil
+			s.flush(c)
+		}
+		// If still null, leave the client blocked.
+	}
+}

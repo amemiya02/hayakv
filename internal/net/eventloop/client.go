@@ -6,11 +6,12 @@ import (
 
 // client holds the state for a single connected client in the event loop.
 type client struct {
-	fd      int
-	queryBuf []byte
-	bc       *bufConn
-	conn     *connection.Connection
+	fd        int
+	queryBuf  []byte
+	bc        *bufConn
+	conn      *connection.Connection
 	wantWrite bool
+	blockKeys []string // keys this client is blocked on (BLPOP/BRPOP), nil if not blocked
 }
 
 // newClient creates a client for the given fd and remote address.

@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 	"github.com/amemiya02/hayakv/internal/proto/resp3"
@@ -26,6 +27,16 @@ func execHello(conn redis.Connection, args [][]byte) redis.Reply {
 			if i+2 >= len(args) {
 				return protocol.MakeErrReply("ERR syntax error in HELLO")
 			}
+			_ = string(args[i+1]) // username ignored in Redis
+			passwd := string(args[i+2])
+			if config.Properties.RequirePass == "" {
+				return protocol.MakeErrReply("ERR Client sent AUTH, but no password is set")
+			}
+			// Redis HELLO AUTH ignores the username; only password matters.
+			if config.Properties.RequirePass != passwd {
+				return protocol.MakeErrReply("WRONGPASS invalid username-password pair or user is disabled.")
+			}
+			conn.SetPassword(passwd)
 			i += 3
 		case "SETNAME":
 			if i+1 >= len(args) {
