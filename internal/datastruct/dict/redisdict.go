@@ -434,6 +434,18 @@ func reverseBits(val uint64) uint64 {
 	return val
 }
 
+// --- Locking methods (no-ops for RedisDict) ---
+// The outer lockedEngine (for goroutine net) or single-threaded eventloop
+// provides the concurrency guarantee, so these delegate to the plain methods.
+
+func (d *RedisDict) GetWithLock(key string) (interface{}, bool)           { return d.Get(key) }
+func (d *RedisDict) PutWithLock(key string, val interface{}) int          { return d.Put(key, val) }
+func (d *RedisDict) PutIfAbsentWithLock(key string, val interface{}) int  { return d.PutIfAbsent(key, val) }
+func (d *RedisDict) PutIfExistsWithLock(key string, val interface{}) int  { return d.PutIfExists(key, val) }
+func (d *RedisDict) RemoveWithLock(key string) (interface{}, int)         { return d.Remove(key) }
+func (d *RedisDict) RWLocks(writeKeys []string, readKeys []string)        {}
+func (d *RedisDict) RWUnLocks(writeKeys []string, readKeys []string)      {}
+
 // DictScan implements cursor-based scanning. The cursor represents
 // the next table index to scan. Returns (keys, nextCursor) where
 // nextCursor==0 means the scan is complete.
@@ -450,9 +462,18 @@ func (d *RedisDict) DictScan(cursor int, count int, pattern string) ([][]byte, i
 
 	// Fast path: return all keys at once
 	if pattern == "*" && count >= size {
-		for _, bucket := range d.tables[0].buckets {
-			for e := bucket; e != nil; e = e.next {
-				result = append(result, []byte(e.key))
+		for i := 0; i < 2; i++ {
+			ht := d.tables[i]
+			if ht == nil {
+				continue
+			}
+			for _, bucket := range ht.buckets {
+				for e := bucket; e != nil; e = e.next {
+					result = append(result, []byte(e.key))
+				}
+			}
+			if !d.isRehashing() {
+				break
 			}
 		}
 		return result, 0

@@ -125,6 +125,16 @@ func (dict *SimpleDict) Clear() {
 	*dict = *MakeSimple()
 }
 
+// --- Locking methods (no-ops for SimpleDict) ---
+
+func (dict *SimpleDict) GetWithLock(key string) (interface{}, bool)          { return dict.Get(key) }
+func (dict *SimpleDict) PutWithLock(key string, val interface{}) int         { return dict.Put(key, val) }
+func (dict *SimpleDict) PutIfAbsentWithLock(key string, val interface{}) int { return dict.PutIfAbsent(key, val) }
+func (dict *SimpleDict) PutIfExistsWithLock(key string, val interface{}) int { return dict.PutIfExists(key, val) }
+func (dict *SimpleDict) RemoveWithLock(key string) (interface{}, int)        { return dict.Remove(key) }
+func (dict *SimpleDict) RWLocks(writeKeys []string, readKeys []string)       {}
+func (dict *SimpleDict) RWUnLocks(writeKeys []string, readKeys []string)     {}
+
 func (dict *SimpleDict) DictScan(cursor int, count int, pattern string) ([][]byte, int) {
 	result := make([][]byte, 0)
 	matchKey, err := wildcard.CompilePattern(pattern)

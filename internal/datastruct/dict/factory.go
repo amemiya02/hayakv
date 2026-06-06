@@ -34,13 +34,17 @@ func SetDictSize(n int) {
 	dictSize = n
 }
 
-// MakeDict creates a ConcurrentDict using the currently configured engine.
-// The DB struct is typed as *ConcurrentDict, so we return that type.
-// For redisdb engine, the lockedEngine decorator provides outer locking.
-func MakeDict() *ConcurrentDict {
+// MakeDict creates a dict using the currently configured engine.
+// For "shardmap" it returns a ConcurrentDict; for "redisdb" it returns a RedisDict.
+// The DB struct holds a dict.Dict interface, so either works.
+func MakeDict() Dict {
 	engineMu.RLock()
+	eng := engine
 	size := dictSize
 	engineMu.RUnlock()
+	if eng == EngineRedisDB {
+		return MakeRedis(size)
+	}
 	return MakeConcurrent(size)
 }
 

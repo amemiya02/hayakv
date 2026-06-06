@@ -6,6 +6,7 @@ import (
 
 	"github.com/amemiya02/hayakv/config"
 	database "github.com/amemiya02/hayakv/internal/command"
+	"github.com/amemiya02/hayakv/internal/datastruct/dict"
 	"github.com/amemiya02/hayakv/internal/iface"
 	"github.com/amemiya02/hayakv/internal/net/eventloop"
 	goroutinenet "github.com/amemiya02/hayakv/internal/net/goroutine"
@@ -43,6 +44,7 @@ func NewStorageEngine(cfg *config.ServerProperties) (iface.StorageEngine, error)
 	case EngineShardMap:
 		return database.NewStandaloneServer(), nil
 	case EngineRedisDB:
+		dict.SetEngine("redisdb")
 		inner := database.NewStandaloneServer()
 		// For goroutine backend, wrap with a global lock since
 		// redisdb uses a single non-sharded dict.

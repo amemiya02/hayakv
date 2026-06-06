@@ -22,7 +22,7 @@ const (
 type DB struct {
 	index int
 	// key -> DataEntity
-	data *dict.ConcurrentDict
+	data dict.Dict
 	// key -> expireTime (time.Time)
 	ttlMap *dict.ConcurrentDict
 	// key -> version(uint32)
