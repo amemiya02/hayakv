@@ -146,6 +146,14 @@ func startHayakv(t *testing.T) (string, func()) {
 }
 
 func startHayakvProto(t *testing.T, proto string) (string, func()) {
+	return startHayakvWithConfig(t, "shardmap", proto)
+}
+
+func startHayakvWithEngine(t *testing.T, engine string) (string, func()) {
+	return startHayakvWithConfig(t, engine, "resp2")
+}
+
+func startHayakvWithConfig(t *testing.T, engine, proto string) (string, func()) {
 	t.Helper()
 	root := projectRoot(t)
 	tmp := t.TempDir()
@@ -162,9 +170,9 @@ port %d
 dir %s
 databases 16
 net goroutine
-engine shardmap
+engine %s
 proto-max %s
-`, port, tmp, proto)), 0o644); err != nil {
+`, port, tmp, engine, proto)), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -265,6 +273,30 @@ func TestM1DifferentialRESP3(t *testing.T) {
 				if !bytes.Equal(h[i], r[i]) {
 					t.Fatalf("cmd %v\nhayakv: %q\nredis:  %q",
 						scenario.Commands[i].Args, h[i], r[i])
+				}
+			}
+		})
+	}
+}
+
+func TestM2DifferentialRedisDB(t *testing.T) {
+	hayakvAddr, stopHayakv := startHayakvWithEngine(t, "redisdb")
+	defer stopHayakv()
+	redisAddr, stopRedis := startRedis8(t)
+	defer stopRedis()
+
+	for _, scenario := range m2Corpus() {
+		scenario := scenario
+		t.Run(scenario.Name, func(t *testing.T) {
+			hayakvReplies := runScenario(t, hayakvAddr, scenario)
+			redisReplies := runScenario(t, redisAddr, scenario)
+			if len(hayakvReplies) != len(redisReplies) {
+				t.Fatalf("reply count hayakv=%d redis=%d", len(hayakvReplies), len(redisReplies))
+			}
+			for i := range hayakvReplies {
+				if !bytes.Equal(hayakvReplies[i], redisReplies[i]) {
+					t.Fatalf("command %v\nhayakv: %q\nredis:  %q",
+						scenario.Commands[i].Args, hayakvReplies[i], redisReplies[i])
 				}
 			}
 		})
