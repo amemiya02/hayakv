@@ -5,6 +5,9 @@ import (
 	"sync"
 )
 
+// Compile-time check that RedisDict implements Dict.
+var _ Dict = (*RedisDict)(nil)
+
 const (
 	loadFactor = 1
 	minSize    = 4
