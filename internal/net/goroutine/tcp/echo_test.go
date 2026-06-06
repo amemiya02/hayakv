@@ -72,7 +72,7 @@ func TestClientCounter(t *testing.T) {
 		go func() {
 			conn, err := net.Dial("tcp", addr)
 			if err != nil {
-				t.Errorf(err.Error())
+				t.Errorf("%s", err.Error())
 			}
 			defer conn.Close()
 

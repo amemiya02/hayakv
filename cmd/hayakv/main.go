@@ -62,7 +62,7 @@ func main() {
 	engine, err := server.NewStorageEngine(config.Properties)
 	if err != nil {
 		msg := fmt.Sprintf("configure storage engine failed: %v", err)
-		logger.Errorf(msg)
+		logger.Errorf("%s", msg)
 		fmt.Fprintln(os.Stderr, msg)
 		return
 	}
@@ -70,7 +70,7 @@ func main() {
 	netServer, err := server.NewNetServer(config.Properties)
 	if err != nil {
 		msg := fmt.Sprintf("configure net server failed: %v", err)
-		logger.Errorf(msg)
+		logger.Errorf("%s", msg)
 		fmt.Fprintln(os.Stderr, msg)
 		return
 	}
