@@ -54,7 +54,7 @@ type UndoFunc func(db *DB, args [][]byte) []CmdLine
 // makeDB create DB instance
 func makeDB() *DB {
 	db := &DB{
-		data:       dict.MakeConcurrent(dataDictSize),
+		data:       dict.MakeDict(),
 		ttlMap:     dict.MakeConcurrent(ttlDictSize),
 		versionMap: dict.MakeConcurrent(dataDictSize),
 		addAof:     func(line CmdLine) {},
