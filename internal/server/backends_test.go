@@ -56,19 +56,25 @@ func TestNewProtocolCodecRESP3(t *testing.T) {
 }
 
 func TestFutureBackendsFailFastInM0(t *testing.T) {
-	cases := []config.ServerProperties{
-		{NetBackend: "eventloop", EngineBackend: "shardmap", ProtoMax: "resp2"},
-		{NetBackend: "goroutine", EngineBackend: "redisdb", ProtoMax: "resp2"},
+	// eventloop should still fail (M4 scope)
+	cfg := config.ServerProperties{NetBackend: "eventloop", EngineBackend: "shardmap", ProtoMax: "resp2"}
+	NormalizeBackends(&cfg)
+	if _, err := NewNetServer(&cfg); err == nil {
+		t.Fatalf("eventloop returned nil error")
 	}
+}
 
-	for _, cfg := range cases {
-		cfg := cfg
-		NormalizeBackends(&cfg)
-		if _, err := NewStorageEngine(&cfg); cfg.EngineBackend == "redisdb" && err == nil {
-			t.Fatalf("redisdb returned nil error")
-		}
-		if _, err := NewNetServer(&cfg); cfg.NetBackend == "eventloop" && err == nil {
-			t.Fatalf("eventloop returned nil error")
-		}
+func TestRedisDBBackend(t *testing.T) {
+	cfg := &config.ServerProperties{
+		NetBackend:    "goroutine",
+		EngineBackend: "redisdb",
+		ProtoMax:      "resp2",
+	}
+	engine, err := NewStorageEngine(cfg)
+	if err != nil {
+		t.Fatalf("NewStorageEngine(redisdb) returned error: %v", err)
+	}
+	if engine == nil {
+		t.Fatal("NewStorageEngine(redisdb) returned nil")
 	}
 }
