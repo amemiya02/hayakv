@@ -12,12 +12,13 @@ import (
 // CmdLine is alias for [][]byte, represents a command line
 type CmdLine = [][]byte
 
-// RespVersion indicates which RESP protocol version to use for encoding
-type RespVersion uint8
+// RespVersion indicates which RESP protocol version to use for encoding.
+// Aliased from iface/redis to avoid import cycle.
+type RespVersion = iredis.RespVersion
 
 const (
-	RESP2 RespVersion = 2
-	RESP3 RespVersion = 3
+	RESP2 = iredis.RESP2
+	RESP3 = iredis.RESP3
 )
 
 // NetServer is the seam for the TCP listener layer.

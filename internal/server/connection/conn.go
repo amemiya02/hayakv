@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/logger"
 	"github.com/amemiya02/hayakv/internal/lib/sync/wait"
 )
@@ -43,6 +44,9 @@ type Connection struct {
 
 	// selected db
 	selectedDB int
+
+	// protocol is the negotiated RESP version (RESP2 until HELLO 3)
+	protocol redis.RespVersion
 
 	// closed is an atomic flag ensuring Close() is idempotent — the reset
 	// + pool return runs exactly once even when Handler.Close and the
@@ -108,6 +112,7 @@ func NewConn(conn net.Conn) *Connection {
 	c.closed = 0    // reset for reuse
 	c.onClose = nil // clear stale callback from previous occupant
 	c.flags = 0     // Close() never clears flags (inherited godis gap)
+	c.protocol = redis.RESP2
 	return c
 }
 
@@ -239,6 +244,19 @@ func (c *Connection) GetDBIndex() int {
 // SelectDB selects a database
 func (c *Connection) SelectDB(dbNum int) {
 	c.selectedDB = dbNum
+}
+
+// Protocol returns the negotiated RESP version for this connection
+func (c *Connection) Protocol() redis.RespVersion {
+	if c.protocol == 0 {
+		return redis.RESP2
+	}
+	return c.protocol
+}
+
+// SetProtocol sets the negotiated RESP version for this connection
+func (c *Connection) SetProtocol(v redis.RespVersion) {
+	c.protocol = v
 }
 
 func (c *Connection) SetSlave() {

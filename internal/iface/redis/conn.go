@@ -1,5 +1,15 @@
 package redis
 
+// RespVersion indicates which RESP protocol version to use for encoding.
+// Defined here (not in iface) to avoid an import cycle: iface/seams.go
+// imports this package, so this package must not import iface.
+type RespVersion uint8
+
+const (
+	RESP2 RespVersion = 2
+	RESP3 RespVersion = 3
+)
+
 // Connection represents a connection with redis client
 type Connection interface {
 	Write([]byte) (int, error)
@@ -26,6 +36,9 @@ type Connection interface {
 
 	GetDBIndex() int
 	SelectDB(int)
+
+	Protocol() RespVersion
+	SetProtocol(RespVersion)
 
 	SetSlave()
 	IsSlave() bool
