@@ -1,146 +1,123 @@
-# Godis
+# hayakv
 
-![license](https://img.shields.io/github/license/HDT3213/godis)
-[![Build Status](https://github.com/hdt3213/godis/actions/workflows/coverall.yml/badge.svg)](https://github.com/HDT3213/godis/actions?query=branch%3Amaster)
-[![Coverage Status](https://coveralls.io/repos/github/HDT3213/godis/badge.svg?branch=master)](https://coveralls.io/github/HDT3213/godis?branch=master)
-[![Go Report Card](https://goreportcard.com/badge/github.com/HDT3213/godis)](https://goreportcard.com/report/github.com/HDT3213/godis)
-<br>
-[![Mentioned in Awesome Go](https://awesome.re/mentioned-badge-flat.svg)](https://github.com/avelino/awesome-go)
+![license](https://img.shields.io/badge/license-GPL--3.0-blue)
+![go](https://img.shields.io/badge/go-1.24%2B-00ADD8)
+![status](https://img.shields.io/badge/milestone-M0-informational)
 
-Godis 是一个用 Go 语言实现的 Redis 服务器。本项目旨在为尝试使用 Go 语言开发高并发中间件的朋友提供一些参考。
+> English version: [README.md](./README.md)
 
-关键功能:
-- 支持 string, list, hash, set, sorted set, bitmap 数据结构
-- 并行内核，提供更优秀的性能
-- 自动过期功能(TTL)
-- 发布订阅
-- 地理位置
-- AOF 持久化、RDB 持久化、aof-use-rdb-preamble 混合持久化
-- 主从复制
-- Multi 命令开启的事务具有**原子性**和隔离性. 若在执行过程中遇到错误, godis 会回滚已执行的命令
-- 内置集群模式. 集群对客户端是透明的, 您可以像使用单机版 redis 一样使用 godis 集群
-  - 使用 Raft 算法维护集群元数据。支持动态扩缩容、自动平衡和主从切换。
-  - `MSET`, `MSETNX`, `DEL`, `Rename`, `RenameNX`  命令在集群模式下原子性执行, 允许 key 在集群的不同节点上
+**hayakv** 是一个用 Go 语言编写的 Redis 兼容键值服务器，基于
+[HDT3213/godis](https://github.com/HDT3213/godis) 构建，并逐步深化为对生产级
+[Redis 8.x](https://github.com/redis/redis) 的忠实重新实现。
 
-可以在[我的博客](https://www.cnblogs.com/Finley/category/1598973.html)了解更多关于
-Godis 的信息。
+它首先是一个**学习项目**：目标是通过亲手实现来*理解 Redis 内核*——数据结构、编码、
+网络模型、协议、持久化和集群。优先级依次为：**正确性 → 可读性 → 性能**。
 
-# 运行 Godis
+## 设计理念
 
-在 GitHub 的 release 页下载 Darwin(MacOS) 和 Linux 版可执行文件。使用命令行启动 Godis 服务器
+hayakv 采用**绞杀者无花果架构（Strangler-Fig）**。服务器按层拆分，每层通过 Go
+接口（"seam"）隔离。每个 seam 首先使用经过验证的 **godis 实现**（保证服务器始终
+可运行），之后再替换为**忠实于 Redis 的**实现——可通过运行时配置切换，支持 A/B 对比。
 
-```bash
-./godis-darwin
-```
+| Seam | godis 基线 | Redis 忠实目标 |
+|---|---|---|
+| **NetServer** | goroutine-per-connection | 单线程事件循环（裸 `epoll`/`kqueue`） |
+| **ProtocolCodec** | RESP2 | RESP2 + RESP3 (`HELLO`) |
+| **StorageEngine** | 分片 map + 分片锁 | 单 `dict` + 增量 rehash + 过期 dict |
+| **Object/Encoding** | Go 原生值 | `int`/`embstr`/`raw`, `listpack`, `intset`, `quicklist`, `skiplist`, `hashtable` |
 
-```bash
-./godis-linux
-```
+**验收标准**是与真实 Redis 8.x 的逐字节行为一致，由差分测试工具验证（见[测试](#测试)）。
 
-![](https://i.loli.net/2021/05/15/oQM1yZ6pWm3AIEj.png)
+## 项目状态
 
-godis 默认监听 0.0.0.0:6399，可以使用 redis-cli 或者其它 redis 客户端连接 Godis 服务器。
+**M0（基线）已完成：** godis 已导入并迁移到
+`github.com/amemiya02/hayakv`，重组为 `cmd/` + `internal/` 布局，定义了四个 seam
+并接入 godis 实现，同时完成差分测试工具、A/B 配置开关和 CI。
 
-![](https://i.loli.net/2021/05/15/7WquEgonzY62sZI.png)
+因此 godis 基线支持的所有功能现在都可以使用：string、list、hash、set、sorted set、
+bitmap、TTL、pub/sub、GEO、事务（`MULTI`/`WATCH`）、AOF + RDB，以及基于 Raft 的
+服务端集群。
 
-godis 首先会从CONFIG环境变量中读取配置文件路径。若环境变量中未设置配置文件路径，则会尝试读取工作目录中的 redis.conf 文件。 
+**路线图：** `M1` RESP3/`HELLO` · `M2` `dict` + 增量 rehash · `M3` 真实 `[]byte`
+编码 · `M4` 单线程事件循环 · `M5` 过期与驱逐 · `M6` RDB/AOF ·
+`M7` 复制（`PSYNC`） · `M8` Redis Cluster 协议。
 
-所有配置项均在 [example.conf](./example.conf) 中作了说明。
-
-## 集群模式
-
-可以使用 node1.conf 和 node2.conf 配置文件，在本地启动一个双节点集群:
+## 快速开始
 
 ```bash
-CONFIG=node1.conf ./godis-darwin &
-CONFIG=node2.conf ./godis-darwin &
+# 构建
+go build ./cmd/hayakv
+
+# 运行 — 从工作目录读取 ./redis.conf（默认监听 :6399），
+# 或通过 CONFIG 环境变量指定配置文件
+go run ./cmd/hayakv
+CONFIG=my.conf go run ./cmd/hayakv
 ```
 
-集群模式对客户端是透明的，只要连接上集群中任意一个节点就可以访问集群中所有数据：
+使用任意 Redis 客户端连接：
 
 ```bash
-redis-cli -p 6399
+redis-cli -p 6399 ping        # PONG
 ```
 
-更多配置请查阅 [example.conf](./example.conf)
-
-## 支持的命令
-
-请参考 [commands.md](https://github.com/HDT3213/godis/blob/master/commands.md)
-
-## 性能测试
-
-环境:
-
-Go version: 1.23
-System: MacOS Monterey 12.5 M2 Air
-
-redis-benchmark 测试结果:
-
-```
-PING_INLINE: 179211.45 requests per second, p50=1.031 msec                    
-PING_MBULK: 173611.12 requests per second, p50=1.071 msec                    
-SET: 158478.61 requests per second, p50=1.535 msec                    
-GET: 156985.86 requests per second, p50=1.127 msec                    
-INCR: 164473.69 requests per second, p50=1.063 msec                    
-LPUSH: 151285.92 requests per second, p50=1.079 msec                    
-RPUSH: 176678.45 requests per second, p50=1.023 msec                    
-LPOP: 177619.89 requests per second, p50=1.039 msec                    
-RPOP: 172413.80 requests per second, p50=1.039 msec                    
-SADD: 159489.64 requests per second, p50=1.047 msec                    
-HSET: 175131.36 requests per second, p50=1.031 msec                    
-SPOP: 170648.45 requests per second, p50=1.031 msec                    
-ZADD: 165289.25 requests per second, p50=1.039 msec                    
-ZPOPMIN: 185528.77 requests per second, p50=0.999 msec                    
-LPUSH (needed to benchmark LRANGE): 172117.05 requests per second, p50=1.055 msec                    
-LRANGE_100 (first 100 elements): 46511.62 requests per second, p50=4.063 msec                   
-LRANGE_300 (first 300 elements): 21217.91 requests per second, p50=9.311 msec                     
-LRANGE_500 (first 500 elements): 13331.56 requests per second, p50=14.407 msec                    
-LRANGE_600 (first 600 elements): 11153.25 requests per second, p50=17.007 msec                    
-MSET (10 keys): 88417.33 requests per second, p50=3.687 msec  
+```go
+rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6399", Protocol: 2})
 ```
 
-## 如何阅读源码
+### A/B 后端切换
 
-本项目的目录结构:
+在配置文件中设置以下选项（参见 [example.conf](./example.conf)）。M0 仅提供
+godis 基线值，其他值将在对应里程碑落地后启用。
 
-- 根目录: main 函数，执行入口
-- config: 配置文件解析
-- interface: 一些模块间的接口定义
-- lib: 各种工具，比如logger、同步和通配符
+| 配置项 | 可选值 | M0 默认值 |
+|---|---|---|
+| `net` | `goroutine` \| `eventloop` *（M4）* | `goroutine` |
+| `engine` | `shardmap` \| `redisdb` *（M2）* | `shardmap` |
+| `proto-max` | `resp2` \| `resp3` *（M1）* | `resp2` |
 
-建议按照下列顺序阅读各包:
+## 目录结构
 
-- tcp: tcp 服务器实现
-- redis: redis 协议解析器
-- datastruct: redis 的各类数据结构实现
-    - dict: hash 表
-    - list: 链表
-    - lock: 用于锁定 key 的锁组件
-    - set： 基于hash表的集合
-    - sortedset: 基于跳表实现的有序集合
-- database: 存储引擎核心
-    - server.go: redis 服务实例, 支持多数据库, 持久化, 主从复制等能力
-    - database.go: 单个 database 的数据结构和功能
-    - router.go: 将命令路由给响应的处理函数
-    - keys.go: del、ttl、expire 等通用命令实现
-    - string.go: get、set 等字符串命令实现
-    - list.go: lpush、lindex 等列表命令实现
-    - hash.go: hget、hset 等哈希表命令实现
-    - set.go: sadd 等集合命令实现
-    - sortedset.go: zadd 等有序集合命令实现
-    - pubsub.go: 发布订阅命令实现
-    - geo.go: GEO 相关命令实现
-    - sys.go: Auth 等系统功能实现
-    - transaction.go: 单机事务实现
-- cluster: 集群
-  - cluster.go: 集群入口
-  - com.go: 节点间通信
-  - del.go: delete 命令原子性实现
-  - keys.go: key 相关命令集群中实现
-  - mset.go: mset 命令原子性实现
-  - multi.go: 集群内事务实现
-  - pubsub.go: 发布订阅实现
-  - rename.go: rename 命令集群实现
-  - tcc.go: tcc 分布式事务底层实现
-- aof: AOF 持久化实现 
+```
+cmd/hayakv/        入口 — 加载配置，组装各 seam
+config/            redis.conf 兼容的配置解析器
+internal/
+  iface/           四个 seam 接口定义 (seams.go)
+  net/             NetServer 实现（goroutine；后续 eventloop）
+  proto/           ProtocolCodec 实现（resp2；后续 resp3）
+  command/         命令表 + 处理函数（godis database 层）
+  datastruct/      dict, list, set, sortedset, bitmap, …
+  persist/         AOF + RDB
+  cluster/         基于 Raft 的服务端集群
+  lib/             logger, utils, wildcard, …
+test/
+  integration/     redis-cli / go-redis 连接测试
+  diff/            与真实 Redis 8.x 的差分测试工具
+```
+
+## 测试
+
+```bash
+go test -race ./...          # 单元 + seam 测试（开启竞态检测）
+go test ./test/integration   # redis-cli + go-redis 连接测试
+```
+
+**差分测试工具**将一组命令分别发送到 hayakv 和真实 Redis 8.x，逐字节比较返回结果。
+它会自动通过 Docker 启动 Redis，也可以指向已有的 Redis 实例：
+
+```bash
+HAYAKV_DIFF_REDIS_ADDR=127.0.0.1:6379 go test ./test/diff
+```
+
+如果 Docker 和 `HAYAKV_DIFF_REDIS_ADDR` 都不可用，测试会自动跳过。
+
+## 不在范围内
+
+Redis 8 内置模块——JSON、查询引擎（全文 + 向量）、TimeSeries 和概率数据结构
+（Bloom/Cuckoo/CMS/Top-K/t-digest）——属于独立的子系统类别，**不在本项目目标内**。
+
+## 许可证
+
+hayakv 使用 **GPL-3.0** 许可证。由于复用了
+[HDT3213/godis](https://github.com/HDT3213/godis)（GPL-3.0）的代码，它属于衍生作品，
+继续使用 GPL-3.0。原始 godis 版权声明已保留——见 [LICENSE](./LICENSE) 和
+[NOTICE](./NOTICE)。
