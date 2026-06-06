@@ -88,7 +88,7 @@ func (h *Handler) Handle(ctx context.Context, conn net.Conn) {
 				return
 			}
 			errReply := protocol.MakeErrReply(payload.Err.Error())
-			_, err := client.Write(h.codec.Encode(errReply, iface.RESP2))
+			_, err := client.Write(h.codec.Encode(errReply, client.Protocol()))
 			if err != nil {
 				h.closeClient(client)
 				logger.Info("connection closed: " + client.RemoteAddr())
@@ -107,7 +107,7 @@ func (h *Handler) Handle(ctx context.Context, conn net.Conn) {
 		}
 		result := h.db.Exec(client, r.Args)
 		if result != nil {
-			_, _ = client.Write(h.codec.Encode(result, iface.RESP2))
+			_, _ = client.Write(h.codec.Encode(result, client.Protocol()))
 		} else {
 			_, _ = client.Write(unknownErrReplyBytes)
 		}
