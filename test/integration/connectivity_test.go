@@ -63,6 +63,10 @@ func projectRoot(t *testing.T) string {
 }
 
 func startHayakv(t *testing.T) (addr string, stop func()) {
+	return startHayakvProto(t, "resp2")
+}
+
+func startHayakvProto(t *testing.T, proto string) (addr string, stop func()) {
 	t.Helper()
 	root := projectRoot(t)
 	tmp := t.TempDir()
@@ -83,8 +87,8 @@ dir %s
 databases 16
 net goroutine
 engine shardmap
-proto-max resp2
-`, port, tmp)), 0o644); err != nil {
+proto-max %s
+`, port, tmp, proto)), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
