@@ -105,9 +105,9 @@ func NewConn(conn net.Conn) *Connection {
 		}
 	}
 	c.conn = conn
-	c.closed = 0  // reset for reuse
+	c.closed = 0    // reset for reuse
 	c.onClose = nil // clear stale callback from previous occupant
-	c.flags = 0   // Close() never clears flags (inherited godis gap)
+	c.flags = 0     // Close() never clears flags (inherited godis gap)
 	return c
 }
 
