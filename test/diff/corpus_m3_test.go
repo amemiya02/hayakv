@@ -3,7 +3,6 @@ package diff
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 )
