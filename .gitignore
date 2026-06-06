@@ -6,25 +6,34 @@
 *.dylib
 *.aof
 *.rdb
+*.log
+
+# Build output
+/hayakv
+/bin/
 
 # Test binary, build with `go test -c`
 *.test
 
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Output of the go coverage tool
 *.out
-target/
 coverage.txt
+
+# Runtime artifacts
+logs/
+tmp/
 node1/
 node2/
+node3/
 
-logs
-
-# jetbrains
-.idea
+# JetBrains
+.idea/
 *.iml
-redis2.conf
 
+# Claude Code / OMC
 .omc/
 .claude/
 docs/superpowers/
 
+# Misc
+redis2.conf

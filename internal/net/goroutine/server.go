@@ -18,7 +18,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/lib/logger"
 	"github.com/amemiya02/hayakv/internal/lib/sync/atomic"
 	"github.com/amemiya02/hayakv/internal/net/goroutine/tcp"
-	"github.com/amemiya02/hayakv/internal/proto/resp2/parser"
+	"github.com/amemiya02/hayakv/internal/proto/resp2"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 	"github.com/amemiya02/hayakv/internal/server/connection"
 )
@@ -31,12 +31,13 @@ var (
 type Handler struct {
 	activeConn sync.Map // *client -> placeholder
 	db         iface.StorageEngine
+	codec      iface.ProtocolCodec
 	closing    atomic.Boolean // refusing new client and new request
 }
 
-// NewHandlerWithDB creates a Handler with an injected storage engine
-func NewHandlerWithDB(db iface.StorageEngine) *Handler {
-	return &Handler{db: db}
+// NewHandlerWithDB creates a Handler with an injected storage engine and protocol codec
+func NewHandlerWithDB(db iface.StorageEngine, codec iface.ProtocolCodec) *Handler {
+	return &Handler{db: db, codec: codec}
 }
 
 // MakeHandler creates a Handler instance
@@ -47,7 +48,8 @@ func MakeHandler() *Handler {
 	} else {
 		db = database.NewStandaloneServer()
 	}
-	return NewHandlerWithDB(db)
+	codec := resp2.Codec{}
+	return NewHandlerWithDB(db, codec)
 }
 
 func Serve(addr string, handler *Handler) error {
@@ -57,9 +59,8 @@ func Serve(addr string, handler *Handler) error {
 }
 
 func (h *Handler) closeClient(client *connection.Connection) {
-	_ = client.Close()
-	h.db.AfterClientClose(client)
 	h.activeConn.Delete(client)
+	_ = client.Close()
 }
 
 // Handle receives and executes redis commands
@@ -71,22 +72,23 @@ func (h *Handler) Handle(ctx context.Context, conn net.Conn) {
 	}
 
 	client := connection.NewConn(conn)
+	client.OnClose(func(c *connection.Connection) {
+		h.db.AfterClientClose(c)
+	})
 	h.activeConn.Store(client, struct{}{})
 
-	ch := parser.ParseStream(conn)
+	ch := h.codec.DecodeStream(conn)
 	for payload := range ch {
 		if payload.Err != nil {
 			if payload.Err == io.EOF ||
 				payload.Err == io.ErrUnexpectedEOF ||
 				strings.Contains(payload.Err.Error(), "use of closed network connection") {
-				// connection closed
 				h.closeClient(client)
 				logger.Info("connection closed: " + client.RemoteAddr())
 				return
 			}
-			// protocol err
 			errReply := protocol.MakeErrReply(payload.Err.Error())
-			_, err := client.Write(errReply.ToBytes())
+			_, err := client.Write(h.codec.Encode(errReply, iface.RESP2))
 			if err != nil {
 				h.closeClient(client)
 				logger.Info("connection closed: " + client.RemoteAddr())
@@ -94,18 +96,18 @@ func (h *Handler) Handle(ctx context.Context, conn net.Conn) {
 			}
 			continue
 		}
-		if payload.Data == nil {
+		if payload.Reply == nil {
 			logger.Error("empty payload")
 			continue
 		}
-		r, ok := payload.Data.(*protocol.MultiBulkReply)
+		r, ok := payload.Reply.(*protocol.MultiBulkReply)
 		if !ok {
 			logger.Error("require multi bulk protocol")
 			continue
 		}
 		result := h.db.Exec(client, r.Args)
 		if result != nil {
-			_, _ = client.Write(result.ToBytes())
+			_, _ = client.Write(h.codec.Encode(result, iface.RESP2))
 		} else {
 			_, _ = client.Write(unknownErrReplyBytes)
 		}
@@ -119,7 +121,7 @@ func (h *Handler) Close() error {
 	// TODO: concurrent wait
 	h.activeConn.Range(func(key interface{}, val interface{}) bool {
 		client := key.(*connection.Connection)
-		_ = client.Close()
+		h.closeClient(client)
 		return true
 	})
 	h.db.Close()

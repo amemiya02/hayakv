@@ -13,16 +13,17 @@ import (
 )
 
 var banner = `
-   ______          ___
-  / ____/___  ____/ (_)____
- / / __/ __ \/ __  / / ___/
-/ /_/ / /_/ / /_/ / (__  )
-\____/\____/\__,_/_/____/
+  _                     _
+ | |__   __ _ _   _  __| | __ ___      __
+ | '_ \ / _' | | | |/ _' |/ _' \ \ /\ / /
+ | | | | (_| | |_| | (_| | (_| |\ V  V /
+ |_| |_|\__, |\__,_|\__,_|\__,_| \_/\_/
+         |___/
 `
 
 var defaultProperties = &config.ServerProperties{
 	Bind:           "0.0.0.0",
-	Port:           6399,
+	Port:           6379,
 	AppendOnly:     false,
 	AppendFilename: "",
 	MaxClients:     1000,
@@ -41,7 +42,7 @@ func main() {
 	print(banner)
 	logger.Setup(&logger.Settings{
 		Path:       "logs",
-		Name:       "godis",
+		Name:       "hayakv",
 		Ext:        "log",
 		TimeFormat: "2006-01-02",
 	})
@@ -75,7 +76,15 @@ func main() {
 		return
 	}
 
-	handler := stdserver.NewHandlerWithDB(engine)
+	codec, err := server.NewProtocolCodec(config.Properties)
+	if err != nil {
+		msg := fmt.Sprintf("configure protocol codec failed: %v", err)
+		logger.Errorf("%s", msg)
+		fmt.Fprintln(os.Stderr, msg)
+		return
+	}
+
+	handler := stdserver.NewHandlerWithDB(engine, codec)
 	ctx := context.Background()
 	err = netServer.Run(ctx, listenAddr, handler)
 	if err != nil {

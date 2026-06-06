@@ -113,7 +113,8 @@ func parse(src io.Reader) *ServerProperties {
 	scanner := bufio.NewScanner(src)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if len(line) > 0 && strings.TrimLeft(line, " ")[0] == '#' {
+		trimmed := strings.TrimLeft(line, " ")
+		if len(trimmed) > 0 && trimmed[0] == '#' {
 			continue
 		}
 		pivot := strings.IndexAny(line, " ")

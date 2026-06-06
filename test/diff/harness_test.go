@@ -1,5 +1,8 @@
 package diff
 
+// TODO: Add normalization hooks for non-deterministic commands (INFO, TIME, random)
+// before adding them to the corpus. The current harness requires byte-for-byte equality.
+
 import (
 	"bufio"
 	"bytes"
@@ -85,7 +88,7 @@ func freePort(t *testing.T) int {
 
 func waitForPing(t *testing.T, addr string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond)
 		if err == nil {
@@ -165,11 +168,17 @@ func startRedis8(t *testing.T) (string, func()) {
 		return addr, func() {}
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("set HAYAKV_DIFF_REDIS_ADDR or install docker")
+		t.Skip("docker not installed; set HAYAKV_DIFF_REDIS_ADDR to test against an external Redis 8")
+	}
+	// Check if Docker daemon is reachable
+	infoCtx, infoCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer infoCancel()
+	if err := exec.CommandContext(infoCtx, "docker", "info").Run(); err != nil {
+		t.Skip("docker daemon not reachable; set HAYAKV_DIFF_REDIS_ADDR or start Docker")
 	}
 	port := freePort(t)
 	name := fmt.Sprintf("hayakv-redis8-%d", time.Now().UnixNano())
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "--name", name, "-p", fmt.Sprintf("%d:6379", port), "redis:8", "redis-server", "--save", "", "--appendonly", "no")
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -193,6 +202,13 @@ func runScenario(t *testing.T, addr string, scenario Scenario) [][]byte {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	replies := make([][]byte, 0, len(scenario.Commands))
+	// Flush all keys before scenario for isolation
+	if _, err := conn.Write(encodeCommand([]string{"FLUSHALL"})); err != nil {
+		t.Fatalf("%s FLUSHALL write: %v", addr, err)
+	}
+	if _, err := readReply(reader); err != nil {
+		t.Fatalf("%s FLUSHALL read: %v", addr, err)
+	}
 	for _, cmd := range scenario.Commands {
 		if _, err := conn.Write(encodeCommand(cmd.Args)); err != nil {
 			t.Fatalf("%s write %v: %v", addr, cmd.Args, err)

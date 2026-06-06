@@ -3,6 +3,7 @@ package connection
 import (
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/amemiya02/hayakv/internal/lib/logger"
@@ -42,6 +43,15 @@ type Connection struct {
 
 	// selected db
 	selectedDB int
+
+	// closed is an atomic flag ensuring Close() is idempotent — the reset
+	// + pool return runs exactly once even when Handler.Close and the
+	// per-conn Handle loop race on the same Connection.
+	closed int32
+
+	// onClose is called once inside the CAS guard, before fields are reset.
+	// Used by the handler to run AfterClientClose while fields are intact.
+	onClose func(*Connection)
 }
 
 var connPool = sync.Pool{
@@ -50,13 +60,27 @@ var connPool = sync.Pool{
 	},
 }
 
+// OnClose registers a callback that runs once inside Close()'s CAS guard,
+// before fields are reset. Used by the handler to run AfterClientClose
+// while the connection's fields are still intact.
+func (c *Connection) OnClose(fn func(*Connection)) {
+	c.onClose = fn
+}
+
 // RemoteAddr returns the remote network address
 func (c *Connection) RemoteAddr() string {
 	return c.conn.RemoteAddr().String()
 }
 
-// Close disconnect with the client
+// Close disconnect with the client. Safe to call concurrently — the cleanup
+// and pool-return run exactly once.
 func (c *Connection) Close() error {
+	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+		return nil
+	}
+	if c.onClose != nil {
+		c.onClose(c)
+	}
 	c.sendingData.WaitWithTimeout(10 * time.Second)
 	if c.conn != nil { // may be a fake conn for tests
 		_ = c.conn.Close()
@@ -81,6 +105,9 @@ func NewConn(conn net.Conn) *Connection {
 		}
 	}
 	c.conn = conn
+	c.closed = 0  // reset for reuse
+	c.onClose = nil // clear stale callback from previous occupant
+	c.flags = 0   // Close() never clears flags (inherited godis gap)
 	return c
 }
 
