@@ -45,11 +45,20 @@ func TestM0BackendSelection(t *testing.T) {
 	}
 }
 
+func TestNewProtocolCodecRESP3(t *testing.T) {
+	codec, err := NewProtocolCodec(&config.ServerProperties{ProtoMax: "resp3"})
+	if err != nil {
+		t.Fatalf("resp3 codec should be available in M1: %v", err)
+	}
+	if codec == nil {
+		t.Fatal("nil codec")
+	}
+}
+
 func TestFutureBackendsFailFastInM0(t *testing.T) {
 	cases := []config.ServerProperties{
 		{NetBackend: "eventloop", EngineBackend: "shardmap", ProtoMax: "resp2"},
 		{NetBackend: "goroutine", EngineBackend: "redisdb", ProtoMax: "resp2"},
-		{NetBackend: "goroutine", EngineBackend: "shardmap", ProtoMax: "resp3"},
 	}
 
 	for _, cfg := range cases {
@@ -57,9 +66,6 @@ func TestFutureBackendsFailFastInM0(t *testing.T) {
 		NormalizeBackends(&cfg)
 		if _, err := NewStorageEngine(&cfg); cfg.EngineBackend == "redisdb" && err == nil {
 			t.Fatalf("redisdb returned nil error")
-		}
-		if _, err := NewProtocolCodec(&cfg); cfg.ProtoMax == "resp3" && err == nil {
-			t.Fatalf("resp3 returned nil error")
 		}
 		if _, err := NewNetServer(&cfg); cfg.NetBackend == "eventloop" && err == nil {
 			t.Fatalf("eventloop returned nil error")

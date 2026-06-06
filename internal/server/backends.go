@@ -9,6 +9,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/iface"
 	goroutinenet "github.com/amemiya02/hayakv/internal/net/goroutine"
 	"github.com/amemiya02/hayakv/internal/proto/resp2"
+	"github.com/amemiya02/hayakv/internal/proto/resp3"
 )
 
 const (
@@ -53,7 +54,7 @@ func NewProtocolCodec(cfg *config.ServerProperties) (iface.ProtocolCodec, error)
 	case ProtoRESP2:
 		return resp2.Codec{}, nil
 	case ProtoRESP3:
-		return nil, fmt.Errorf("protocol backend %q is M1 scope", cfg.ProtoMax)
+		return resp3.Codec{}, nil
 	default:
 		return nil, fmt.Errorf("unknown protocol backend %q", cfg.ProtoMax)
 	}
