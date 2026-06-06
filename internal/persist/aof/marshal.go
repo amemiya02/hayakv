@@ -9,6 +9,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/datastruct/set"
 	SortedSet "github.com/amemiya02/hayakv/internal/datastruct/sortedset"
 	"github.com/amemiya02/hayakv/internal/iface/database"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
 
@@ -19,6 +20,8 @@ func EntityToCmd(key string, entity *database.DataEntity) *protocol.MultiBulkRep
 	}
 	var cmd *protocol.MultiBulkReply
 	switch val := entity.Data.(type) {
+	case *object.Robj:
+		cmd = robjToCmd(key, val)
 	case []byte:
 		cmd = stringToCmd(key, val)
 	case List.List:
@@ -31,6 +34,39 @@ func EntityToCmd(key string, entity *database.DataEntity) *protocol.MultiBulkRep
 		cmd = zSetToCmd(key, val)
 	}
 	return cmd
+}
+
+// robjToCmd serializes an Robj to the appropriate redis command
+func robjToCmd(key string, robj *object.Robj) *protocol.MultiBulkReply {
+	switch robj.Type {
+	case object.TypeString:
+		return stringToCmd(key, robj.GetStringBytes())
+	case object.TypeList:
+		list, ok := robj.Value().(List.List)
+		if !ok {
+			return nil
+		}
+		return listToCmd(key, list)
+	case object.TypeSet:
+		set, ok := robj.Value().(*set.Set)
+		if !ok {
+			return nil
+		}
+		return setToCmd(key, set)
+	case object.TypeHash:
+		hash, ok := robj.Value().(*object.Hash)
+		if !ok {
+			return nil
+		}
+		return hashToCmd(key, hash.GetAsDict())
+	case object.TypeZSet:
+		zset, ok := robj.Value().(*SortedSet.SortedSet)
+		if !ok {
+			return nil
+		}
+		return zSetToCmd(key, zset)
+	}
+	return nil
 }
 
 var setCmd = []byte("SET")

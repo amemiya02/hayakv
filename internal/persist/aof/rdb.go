@@ -12,6 +12,7 @@ import (
 	SortedSet "github.com/amemiya02/hayakv/internal/datastruct/sortedset"
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/lib/logger"
+	"github.com/amemiya02/hayakv/internal/object"
 	rdb "github.com/hdt3213/rdb/encoder"
 	"github.com/hdt3213/rdb/model"
 )
@@ -141,6 +142,61 @@ func (persister *Persister) generateRDB(ctx *RewriteCtx) error {
 				opts = append(opts, rdb.WithTTL(uint64(expiration.UnixNano()/1e6)))
 			}
 			switch obj := entity.Data.(type) {
+			case *object.Robj:
+				switch obj.Type {
+				case object.TypeString:
+					err = encoder.WriteStringObject(key, obj.GetStringBytes(), opts...)
+				case object.TypeList:
+					list, ok := obj.Value().(List.List)
+					if !ok {
+						break
+					}
+					vals := make([][]byte, 0, list.Len())
+					list.ForEach(func(i int, v interface{}) bool {
+						bytes, _ := v.([]byte)
+						vals = append(vals, bytes)
+						return true
+					})
+					err = encoder.WriteListObject(key, vals, opts...)
+				case object.TypeSet:
+					s, ok := obj.Value().(*set.Set)
+					if !ok {
+						break
+					}
+					vals := make([][]byte, 0, s.Len())
+					s.ForEach(func(m string) bool {
+						vals = append(vals, []byte(m))
+						return true
+					})
+					err = encoder.WriteSetObject(key, vals, opts...)
+				case object.TypeHash:
+					hash, ok := obj.Value().(*object.Hash)
+					if !ok {
+						break
+					}
+					d := hash.GetAsDict()
+					h := make(map[string][]byte)
+					d.ForEach(func(key string, val interface{}) bool {
+						bytes, _ := val.([]byte)
+						h[key] = bytes
+						return true
+					})
+					err = encoder.WriteHashMapObject(key, h, opts...)
+				case object.TypeZSet:
+					zset, ok := obj.Value().(*SortedSet.SortedSet)
+					if !ok {
+						break
+					}
+					var entries []*model.ZSetEntry
+					zset.ForEachByRank(int64(0), zset.Len(), true, func(element *SortedSet.Element) bool {
+						entries = append(entries, &model.ZSetEntry{
+							Member: element.Member,
+							Score:  element.Score,
+						})
+						return true
+					})
+					err = encoder.WriteZSetObject(key, entries, opts...)
+				}
 			case []byte:
 				err = encoder.WriteStringObject(key, obj, opts...)
 			case List.List:

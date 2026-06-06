@@ -5,6 +5,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 	"math"
 	"strconv"
@@ -16,27 +17,52 @@ func (db *DB) getAsSortedSet(key string) (*SortedSet.SortedSet, protocol.ErrorRe
 	if !exists {
 		return nil, nil
 	}
-	sortedSet, ok := entity.Data.(*SortedSet.SortedSet)
-	if !ok {
+	switch v := entity.Data.(type) {
+	case *object.Robj:
+		if v.Type != object.TypeZSet {
+			return nil, &protocol.WrongTypeErrReply{}
+		}
+		zset, ok := v.Value().(*SortedSet.SortedSet)
+		if !ok {
+			return nil, &protocol.WrongTypeErrReply{}
+		}
+		return zset, nil
+	case *SortedSet.SortedSet:
+		return v, nil
+	default:
 		return nil, &protocol.WrongTypeErrReply{}
 	}
-	return sortedSet, nil
 }
 
 func (db *DB) getOrInitSortedSet(key string) (sortedSet *SortedSet.SortedSet, inited bool, errReply protocol.ErrorReply) {
-	sortedSet, errReply = db.getAsSortedSet(key)
-	if errReply != nil {
-		return nil, false, errReply
+	entity, exists := db.GetEntity(key)
+	if exists {
+		switch v := entity.Data.(type) {
+		case *object.Robj:
+			if v.Type != object.TypeZSet {
+				return nil, false, &protocol.WrongTypeErrReply{}
+			}
+			zset, ok := v.Value().(*SortedSet.SortedSet)
+			if !ok {
+				return nil, false, &protocol.WrongTypeErrReply{}
+			}
+			return zset, false, nil
+		case *SortedSet.SortedSet:
+			return v, false, nil
+		default:
+			return nil, false, &protocol.WrongTypeErrReply{}
+		}
 	}
-	inited = false
-	if sortedSet == nil {
-		sortedSet = SortedSet.Make()
-		db.PutEntity(key, &database.DataEntity{
-			Data: sortedSet,
-		})
-		inited = true
+	sortedSet = SortedSet.Make()
+	robj := &object.Robj{
+		Type:     object.TypeZSet,
+		Encoding: object.EncSkiplist,
+		Ptr:      sortedSet,
 	}
-	return sortedSet, inited, nil
+	db.PutEntity(key, &database.DataEntity{
+		Data: robj,
+	})
+	return sortedSet, true, nil
 }
 
 // execZAdd adds member into sorted set

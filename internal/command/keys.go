@@ -8,6 +8,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
 	"github.com/amemiya02/hayakv/internal/lib/wildcard"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/persist/aof"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 	"math"
@@ -65,7 +66,9 @@ func getType(db *DB, key string) string {
 	if !exists {
 		return "none"
 	}
-	switch entity.Data.(type) {
+	switch v := entity.Data.(type) {
+	case *object.Robj:
+		return v.TypeName()
 	case []byte:
 		return "string"
 	case list.List:

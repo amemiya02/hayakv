@@ -9,6 +9,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
 
@@ -17,27 +18,52 @@ func (db *DB) getAsList(key string) (List.List, protocol.ErrorReply) {
 	if !ok {
 		return nil, nil
 	}
-	list, ok := entity.Data.(List.List)
-	if !ok {
+	switch v := entity.Data.(type) {
+	case *object.Robj:
+		if v.Type != object.TypeList {
+			return nil, &protocol.WrongTypeErrReply{}
+		}
+		list, ok := v.Value().(List.List)
+		if !ok {
+			return nil, &protocol.WrongTypeErrReply{}
+		}
+		return list, nil
+	case List.List:
+		return v, nil
+	default:
 		return nil, &protocol.WrongTypeErrReply{}
 	}
-	return list, nil
 }
 
 func (db *DB) getOrInitList(key string) (list List.List, isNew bool, errReply protocol.ErrorReply) {
-	list, errReply = db.getAsList(key)
-	if errReply != nil {
-		return nil, false, errReply
+	entity, exists := db.GetEntity(key)
+	if exists {
+		switch v := entity.Data.(type) {
+		case *object.Robj:
+			if v.Type != object.TypeList {
+				return nil, false, &protocol.WrongTypeErrReply{}
+			}
+			list, ok := v.Value().(List.List)
+			if !ok {
+				return nil, false, &protocol.WrongTypeErrReply{}
+			}
+			return list, false, nil
+		case List.List:
+			return v, false, nil
+		default:
+			return nil, false, &protocol.WrongTypeErrReply{}
+		}
 	}
-	isNew = false
-	if list == nil {
-		list = List.NewQuickList()
-		db.PutEntity(key, &database.DataEntity{
-			Data: list,
-		})
-		isNew = true
+	list = List.NewQuickList()
+	robj := &object.Robj{
+		Type:     object.TypeList,
+		Encoding: object.EncQuicklist,
+		Ptr:      list,
 	}
-	return list, isNew, nil
+	db.PutEntity(key, &database.DataEntity{
+		Data: robj,
+	})
+	return list, true, nil
 }
 
 // execLIndex gets element of list at given list

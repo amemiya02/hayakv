@@ -5,6 +5,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 	"strconv"
 	"strings"
@@ -15,27 +16,51 @@ func (db *DB) getAsDict(key string) (Dict.Dict, protocol.ErrorReply) {
 	if !exists {
 		return nil, nil
 	}
-	dict, ok := entity.Data.(Dict.Dict)
-	if !ok {
+	switch v := entity.Data.(type) {
+	case *object.Robj:
+		if v.Type != object.TypeHash {
+			return nil, &protocol.WrongTypeErrReply{}
+		}
+		hash := v.Value().(*object.Hash)
+		return hash.GetAsDict(), nil
+	case *object.Hash:
+		return v.GetAsDict(), nil
+	case Dict.Dict:
+		return v, nil
+	default:
 		return nil, &protocol.WrongTypeErrReply{}
 	}
-	return dict, nil
 }
 
 func (db *DB) getOrInitDict(key string) (dict Dict.Dict, inited bool, errReply protocol.ErrorReply) {
-	dict, errReply = db.getAsDict(key)
-	if errReply != nil {
-		return nil, false, errReply
+	entity, exists := db.GetEntity(key)
+	if exists {
+		switch v := entity.Data.(type) {
+		case *object.Robj:
+			if v.Type != object.TypeHash {
+				return nil, false, &protocol.WrongTypeErrReply{}
+			}
+			hash := v.Value().(*object.Hash)
+			return hash.GetAsDict(), false, nil
+		case *object.Hash:
+			return v.GetAsDict(), false, nil
+		case Dict.Dict:
+			return v, false, nil
+		default:
+			return nil, false, &protocol.WrongTypeErrReply{}
+		}
 	}
-	inited = false
-	if dict == nil {
-		dict = Dict.MakeSimple()
-		db.PutEntity(key, &database.DataEntity{
-			Data: dict,
-		})
-		inited = true
+	// Create new hash with Robj wrapper
+	hash := object.NewHash()
+	robj := &object.Robj{
+		Type:     object.TypeHash,
+		Encoding: object.EncListpack,
+		Ptr:      hash,
 	}
-	return dict, inited, nil
+	db.PutEntity(key, &database.DataEntity{
+		Data: robj,
+	})
+	return hash.GetAsDict(), true, nil
 }
 
 // execHSet sets field in hash table

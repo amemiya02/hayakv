@@ -5,6 +5,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 	"strconv"
 	"strings"
@@ -15,27 +16,52 @@ func (db *DB) getAsSet(key string) (*HashSet.Set, protocol.ErrorReply) {
 	if !exists {
 		return nil, nil
 	}
-	set, ok := entity.Data.(*HashSet.Set)
-	if !ok {
+	switch v := entity.Data.(type) {
+	case *object.Robj:
+		if v.Type != object.TypeSet {
+			return nil, &protocol.WrongTypeErrReply{}
+		}
+		set, ok := v.Value().(*HashSet.Set)
+		if !ok {
+			return nil, &protocol.WrongTypeErrReply{}
+		}
+		return set, nil
+	case *HashSet.Set:
+		return v, nil
+	default:
 		return nil, &protocol.WrongTypeErrReply{}
 	}
-	return set, nil
 }
 
 func (db *DB) getOrInitSet(key string) (set *HashSet.Set, inited bool, errReply protocol.ErrorReply) {
-	set, errReply = db.getAsSet(key)
-	if errReply != nil {
-		return nil, false, errReply
+	entity, exists := db.GetEntity(key)
+	if exists {
+		switch v := entity.Data.(type) {
+		case *object.Robj:
+			if v.Type != object.TypeSet {
+				return nil, false, &protocol.WrongTypeErrReply{}
+			}
+			set, ok := v.Value().(*HashSet.Set)
+			if !ok {
+				return nil, false, &protocol.WrongTypeErrReply{}
+			}
+			return set, false, nil
+		case *HashSet.Set:
+			return v, false, nil
+		default:
+			return nil, false, &protocol.WrongTypeErrReply{}
+		}
 	}
-	inited = false
-	if set == nil {
-		set = HashSet.Make()
-		db.PutEntity(key, &database.DataEntity{
-			Data: set,
-		})
-		inited = true
+	set = HashSet.Make()
+	robj := &object.Robj{
+		Type:     object.TypeSet,
+		Encoding: object.EncHashtable,
+		Ptr:      set,
 	}
-	return set, inited, nil
+	db.PutEntity(key, &database.DataEntity{
+		Data: robj,
+	})
+	return set, true, nil
 }
 
 // execSAdd adds members into set
@@ -227,7 +253,7 @@ func execSInterStore(db *DB, args [][]byte) redis.Reply {
 	result := HashSet.Intersect(sets...)
 
 	db.PutEntity(dest, &database.DataEntity{
-		Data: result,
+		Data: &object.Robj{Type: object.TypeSet, Encoding: object.EncHashtable, Ptr: result},
 	})
 	db.addAof(utils.ToCmdLine3("sinterstore", args...))
 	return protocol.MakeIntReply(int64(result.Len()))
@@ -267,7 +293,7 @@ func execSUnionStore(db *DB, args [][]byte) redis.Reply {
 	}
 
 	db.PutEntity(dest, &database.DataEntity{
-		Data: result,
+		Data: &object.Robj{Type: object.TypeSet, Encoding: object.EncHashtable, Ptr: result},
 	})
 	db.addAof(utils.ToCmdLine3("sunionstore", args...))
 	return protocol.MakeIntReply(int64(result.Len()))
@@ -306,7 +332,7 @@ func execSDiffStore(db *DB, args [][]byte) redis.Reply {
 		return protocol.MakeIntReply(0)
 	}
 	db.PutEntity(dest, &database.DataEntity{
-		Data: result,
+		Data: &object.Robj{Type: object.TypeSet, Encoding: object.EncHashtable, Ptr: result},
 	})
 	db.addAof(utils.ToCmdLine3("sdiffstore", args...))
 	return protocol.MakeIntReply(int64(result.Len()))
