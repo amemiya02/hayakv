@@ -1,0 +1,72 @@
+package server
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/amemiya02/hayakv/config"
+	database "github.com/amemiya02/hayakv/internal/command"
+	"github.com/amemiya02/hayakv/internal/iface"
+	goroutinenet "github.com/amemiya02/hayakv/internal/net/goroutine"
+	"github.com/amemiya02/hayakv/internal/proto/resp2"
+)
+
+const (
+	NetGoroutine   = "goroutine"
+	NetEventLoop   = "eventloop"
+	EngineShardMap = "shardmap"
+	EngineRedisDB  = "redisdb"
+	ProtoRESP2     = "resp2"
+	ProtoRESP3     = "resp3"
+)
+
+func NormalizeBackends(cfg *config.ServerProperties) {
+	if strings.TrimSpace(cfg.NetBackend) == "" {
+		cfg.NetBackend = NetGoroutine
+	}
+	if strings.TrimSpace(cfg.EngineBackend) == "" {
+		cfg.EngineBackend = EngineShardMap
+	}
+	if strings.TrimSpace(cfg.ProtoMax) == "" {
+		cfg.ProtoMax = ProtoRESP2
+	}
+	cfg.NetBackend = strings.ToLower(cfg.NetBackend)
+	cfg.EngineBackend = strings.ToLower(cfg.EngineBackend)
+	cfg.ProtoMax = strings.ToLower(cfg.ProtoMax)
+}
+
+func NewStorageEngine(cfg *config.ServerProperties) (iface.StorageEngine, error) {
+	NormalizeBackends(cfg)
+	switch cfg.EngineBackend {
+	case EngineShardMap:
+		return database.NewStandaloneServer(), nil
+	case EngineRedisDB:
+		return nil, fmt.Errorf("engine backend %q is M2 scope", cfg.EngineBackend)
+	default:
+		return nil, fmt.Errorf("unknown engine backend %q", cfg.EngineBackend)
+	}
+}
+
+func NewProtocolCodec(cfg *config.ServerProperties) (iface.ProtocolCodec, error) {
+	NormalizeBackends(cfg)
+	switch cfg.ProtoMax {
+	case ProtoRESP2:
+		return resp2.Codec{}, nil
+	case ProtoRESP3:
+		return nil, fmt.Errorf("protocol backend %q is M1 scope", cfg.ProtoMax)
+	default:
+		return nil, fmt.Errorf("unknown protocol backend %q", cfg.ProtoMax)
+	}
+}
+
+func NewNetServer(cfg *config.ServerProperties) (iface.NetServer, error) {
+	NormalizeBackends(cfg)
+	switch cfg.NetBackend {
+	case NetGoroutine:
+		return goroutinenet.NewServer(), nil
+	case NetEventLoop:
+		return nil, fmt.Errorf("net backend %q is M4 scope", cfg.NetBackend)
+	default:
+		return nil, fmt.Errorf("unknown net backend %q", cfg.NetBackend)
+	}
+}

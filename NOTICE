@@ -1,0 +1,5 @@
+hayakv contains source code derived from HDT3213/godis:
+https://github.com/HDT3213/godis
+
+The imported godis code is licensed under GPL-3.0. hayakv is distributed
+under GPL-3.0 and preserves the upstream LICENSE file.
