@@ -1,161 +1,129 @@
-# Godis
+# hayakv
 
-![license](https://img.shields.io/github/license/HDT3213/godis)
-[![Build Status](https://github.com/hdt3213/godis/actions/workflows/coverall.yml/badge.svg)](https://github.com/HDT3213/godis/actions?query=branch%3Amaster)
-[![Coverage Status](https://coveralls.io/repos/github/HDT3213/godis/badge.svg?branch=master)](https://coveralls.io/github/HDT3213/godis?branch=master)
-[![Go Report Card](https://goreportcard.com/badge/github.com/HDT3213/godis)](https://goreportcard.com/report/github.com/HDT3213/godis)
-[![Go Reference](https://pkg.go.dev/badge/github.com/hdt3213/godis.svg)](https://pkg.go.dev/github.com/hdt3213/godis)
-<br>
-[![Mentioned in Awesome Go](https://awesome.re/mentioned-badge-flat.svg)](https://github.com/avelino/awesome-go)
+![license](https://img.shields.io/badge/license-GPL--3.0-blue)
+![go](https://img.shields.io/badge/go-1.24%2B-00ADD8)
+![status](https://img.shields.io/badge/milestone-M0-informational)
 
-[中文版](https://github.com/hdt3213/godis/blob/master/README_CN.md)
+> 中文版见 [README_CN.md](./README_CN.md)
 
-`Godis` is a golang implementation of Redis Server, which intents to provide an example of writing a high concurrent
-middleware using golang.
+**hayakv** is a Redis-compatible key-value server written in Go, built on top of
+[HDT3213/godis](https://github.com/HDT3213/godis) and progressively deepened toward a
+faithful reimplementation of production [Redis 8.x](https://github.com/redis/redis).
 
-Key Features:
+It is first and foremost a **learning project**: the goal is to *understand the Redis kernel*
+— its data structures, encodings, network model, protocol, persistence, and clustering — by
+implementing them by hand. Priorities, in order: **correctness → readability → performance**.
 
-- Support string, list, hash, set, sorted set, bitmap
-- Concurrent Core for better performance
-- TTL
-- Publish/Subscribe
-- GEO
-- AOF and AOF Rewrite
-- RDB read and write
-- Multi Database and `SELECT` command
-- Transaction is **Atomic** and Isolated. If any errors are encountered during execution, godis will rollback the executed commands
-- Replication
-- Server-side Cluster which is transparent to client. You can connect to any node in the cluster to access all data in the cluster.
-  - Cluster metadata management based on Raft. Support dynamic expansion, rebalancing and failover.
-  - `MSET`, `MSETNX`, `DEL`, `Rename`, `RenameNX` command is supported and atomically executed in cluster mode, allow over multi node.
-  - `MULTI` Commands Transaction is supported within slot in cluster mode
+## Design philosophy
 
-If you could read Chinese, you can find more details in [My Blog](https://www.cnblogs.com/Finley/category/1598973.html).
+hayakv uses a **strangler-fig architecture**. The server is split into layers, and each layer
+is isolated behind a Go interface ("seam"). Every seam ships first with the proven **godis
+implementation** (so the server always runs), and is later swapped for a **Redis-faithful**
+implementation — selectable at runtime for side-by-side A/B comparison.
 
-## Get Started
+| Seam | godis baseline | Redis-faithful target |
+|---|---|---|
+| **NetServer** | goroutine-per-connection | single-threaded event loop (bare `epoll`/`kqueue`) |
+| **ProtocolCodec** | RESP2 | RESP2 + RESP3 (`HELLO`) |
+| **StorageEngine** | sharded map + sharded locks | single `dict` + incremental rehash + expiry dict |
+| **Object/Encoding** | Go-native values | `int`/`embstr`/`raw`, `listpack`, `intset`, `quicklist`, `skiplist`, `hashtable` |
 
-You can get runnable program in the releases of this repository, which supports Linux and Darwin system.
+The **acceptance bar** is byte-for-byte behavioral parity with real Redis 8.x, verified by a
+differential test harness (see [Testing](#testing)).
 
-```bash
-./godis-darwin
-```
+## Project status
 
-```bash
-./godis-linux
-```
+**M0 (baseline) is complete:** godis imported and re-homed under
+`github.com/amemiya02/hayakv`, restructured into `cmd/` + `internal/`, the four seams defined
+with godis implementations behind them, plus a differential test harness, A/B config switches,
+and CI.
 
-![](https://i.loli.net/2021/05/15/oQM1yZ6pWm3AIEj.png)
+Everything the godis baseline supports therefore works today: strings, lists, hashes, sets,
+sorted sets, bitmaps, TTL, pub/sub, GEO, transactions (`MULTI`/`WATCH`), AOF + RDB, and
+Raft-based server-side clustering.
 
-You could use redis-cli or other redis client to connect godis server, which listens on 0.0.0.0:6399 on default mode.
+**Roadmap:** `M1` RESP3/`HELLO` · `M2` `dict` + incremental rehash · `M3` real `[]byte`
+encodings · `M4` single-threaded event loop · `M5` expiry & eviction · `M6` RDB/AOF ·
+`M7` replication (`PSYNC`) · `M8` Redis Cluster protocol.
 
-![](https://i.loli.net/2021/05/15/7WquEgonzY62sZI.png)
-
-The program will try to read config file path from environment variable `CONFIG`.
-
-If environment variable is not set, then the program try to read `redis.conf` in the working directory.
-
-Please see [example.conf](./example.conf) for all configuration information.
-
-### cluster mode
-
-We provide node1.conf and node2.conf for demonstration. use following command line to start a two-node-cluster:
+## Getting started
 
 ```bash
-CONFIG=node1.conf ./godis-darwin &
-CONFIG=node2.conf ./godis-darwin &
-``` 
+# build
+go build ./cmd/hayakv
 
-Connect to a node in the cluster to access all data in the cluster:
-
-```cmd
-redis-cli -p 6399
+# run — reads ./redis.conf from the working dir (bundled config listens on :6399),
+# or set CONFIG to point elsewhere
+go run ./cmd/hayakv
+CONFIG=my.conf go run ./cmd/hayakv
 ```
 
-Please refer to [example.conf](./example.conf) for cluster configuration.
+Connect with any Redis client:
 
-## Supported Commands
-
-See: [commands.md](https://github.com/HDT3213/godis/blob/master/commands.md)
-
-## Benchmark
-
-Environment:
-
-Go version：1.23
-System: MacOS Monterey 12.5 M2 Air
-
-Performance report by redis-benchmark: 
-
-```
-PING_INLINE: 179211.45 requests per second, p50=1.031 msec                    
-PING_MBULK: 173611.12 requests per second, p50=1.071 msec                    
-SET: 158478.61 requests per second, p50=1.535 msec                    
-GET: 156985.86 requests per second, p50=1.127 msec                    
-INCR: 164473.69 requests per second, p50=1.063 msec                    
-LPUSH: 151285.92 requests per second, p50=1.079 msec                    
-RPUSH: 176678.45 requests per second, p50=1.023 msec                    
-LPOP: 177619.89 requests per second, p50=1.039 msec                    
-RPOP: 172413.80 requests per second, p50=1.039 msec                    
-SADD: 159489.64 requests per second, p50=1.047 msec                    
-HSET: 175131.36 requests per second, p50=1.031 msec                    
-SPOP: 170648.45 requests per second, p50=1.031 msec                    
-ZADD: 165289.25 requests per second, p50=1.039 msec                    
-ZPOPMIN: 185528.77 requests per second, p50=0.999 msec                    
-LPUSH (needed to benchmark LRANGE): 172117.05 requests per second, p50=1.055 msec                    
-LRANGE_100 (first 100 elements): 46511.62 requests per second, p50=4.063 msec                   
-LRANGE_300 (first 300 elements): 21217.91 requests per second, p50=9.311 msec                     
-LRANGE_500 (first 500 elements): 13331.56 requests per second, p50=14.407 msec                    
-LRANGE_600 (first 600 elements): 11153.25 requests per second, p50=17.007 msec                    
-MSET (10 keys): 88417.33 requests per second, p50=3.687 msec  
+```bash
+redis-cli -p 6399 ping        # PONG
 ```
 
-## Read My Code
+```go
+rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6399", Protocol: 2})
+```
 
-If you want to read my code in this repository, here is a simple guidance.
+### A/B backend switches
 
-- project root: only the entry point
-- config: config parser
-- interface: some interface definitions
-- lib: some utils, such as logger, sync utils and wildcard
+Set these in your config file (see [example.conf](./example.conf)). Only the godis-baseline
+values are available in M0; the others light up as their milestones land.
 
-I suggest focusing on the following directories:
+| Key | Values | M0 default |
+|---|---|---|
+| `net` | `goroutine` \| `eventloop` *(M4)* | `goroutine` |
+| `engine` | `shardmap` \| `redisdb` *(M2)* | `shardmap` |
+| `proto-max` | `resp2` \| `resp3` *(M1)* | `resp2` |
 
-- tcp: the tcp server
-- redis: the redis protocol parser
-- datastruct: the implements of data structures
-    - dict: a concurrent hash map
-    - list: a linked list
-    - lock: it is used to lock keys to ensure thread safety
-    - set: a hash set based on map
-    - sortedset: a sorted set implements based on skiplist
-- database: the core of storage engine
-    - server.go: a standalone redis server, with multiple database
-    - database.go: data structure and base functions of single database
-    - exec.go: the gateway of database
-    - router.go: the command table
-    - keys.go: handlers for keys commands
-    - string.go: handlers for string commands
-    - list.go: handlers for list commands
-    - hash.go: handlers for hash commands
-    - set.go: handlers for set commands
-    - sortedset.go: handlers for sorted set commands
-    - pubsub.go: implements of publish / subscribe
-    - aof.go: implements of AOF persistence and rewrite
-    - geo.go: implements of geography features
-    - sys.go: authentication and other system function
-    - transaction.go: local transaction
-- cluster: 
-    - cluster.go: entrance of cluster mode
-    - com.go: communication within nodes
-    - del.go: atomic implementation of `delete` command in cluster
-    - keys.go: keys command
-    - mset.go: atomic implementation of `mset` command in cluster
-    - multi.go: entrance of distributed transaction
-    - pubsub.go: pub/sub in cluster
-    - rename.go: `rename` command in cluster 
-    - tcc.go: try-commit-catch distributed transaction implementation
-- aof: AOF persistence
+## Layout
 
-# License
+```
+cmd/hayakv/        entry point — loads config, assembles the seams
+config/            redis.conf-compatible config parser
+internal/
+  iface/           the four seam interfaces (seams.go)
+  net/             NetServer implementations (goroutine; eventloop later)
+  proto/           ProtocolCodec implementations (resp2; resp3 later)
+  command/         command table + handlers (godis database layer)
+  datastruct/      dict, list, set, sortedset, bitmap, …
+  persist/         AOF + RDB
+  cluster/         Raft-backed server-side cluster
+  lib/             logger, utils, wildcard, …
+test/
+  integration/     redis-cli / go-redis connectivity
+  diff/            differential harness vs real Redis 8.x
+```
 
-This project is licensed under the [GPL license](https://github.com/hdt3213/godis/blob/master/LICENSE).
+## Testing
+
+```bash
+go test -race ./...          # unit + seam tests (race detector on)
+go test ./test/integration   # redis-cli + go-redis connectivity
+```
+
+The **differential harness** replays a command corpus against both hayakv and a real Redis 8.x
+and compares replies byte-for-byte. It runs Redis via Docker automatically, or point it at an
+existing instance:
+
+```bash
+HAYAKV_DIFF_REDIS_ADDR=127.0.0.1:6379 go test ./test/diff
+```
+
+If neither Docker nor `HAYAKV_DIFF_REDIS_ADDR` is available, the harness skips cleanly.
+
+## Out of scope
+
+The Redis 8 bundled module universe — JSON, the query engine (full-text + vector), TimeSeries,
+and the probabilistic types (Bloom/Cuckoo/CMS/Top-K/t-digest) — is a separate class of
+subsystem and **not a goal** of this project.
+
+## License
+
+hayakv is licensed under **GPL-3.0**. Because it reuses code from
+[HDT3213/godis](https://github.com/HDT3213/godis) (GPL-3.0), it is a derivative work and
+remains GPL-3.0. The original godis copyright notice is preserved — see [LICENSE](./LICENSE)
+and [NOTICE](./NOTICE).
