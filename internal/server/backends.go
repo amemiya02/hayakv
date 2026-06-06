@@ -7,6 +7,7 @@ import (
 	"github.com/amemiya02/hayakv/config"
 	database "github.com/amemiya02/hayakv/internal/command"
 	"github.com/amemiya02/hayakv/internal/iface"
+	"github.com/amemiya02/hayakv/internal/net/eventloop"
 	goroutinenet "github.com/amemiya02/hayakv/internal/net/goroutine"
 	"github.com/amemiya02/hayakv/internal/proto/resp2"
 	"github.com/amemiya02/hayakv/internal/proto/resp3"
@@ -68,12 +69,22 @@ func NewProtocolCodec(cfg *config.ServerProperties) (iface.ProtocolCodec, error)
 }
 
 func NewNetServer(cfg *config.ServerProperties) (iface.NetServer, error) {
+	return NewNetServerWithEngine(cfg, nil)
+}
+
+// NewNetServerWithEngine creates a NetServer with an injected engine.
+// For the eventloop backend, the engine is required.
+func NewNetServerWithEngine(cfg *config.ServerProperties, engine iface.StorageEngine) (iface.NetServer, error) {
 	NormalizeBackends(cfg)
 	switch cfg.NetBackend {
 	case NetGoroutine:
 		return goroutinenet.NewServer(), nil
 	case NetEventLoop:
-		return nil, fmt.Errorf("net backend %q is M4 scope", cfg.NetBackend)
+		resp := iface.RESP2
+		if cfg.ProtoMax == ProtoRESP3 {
+			resp = iface.RESP3
+		}
+		return eventloop.NewServer(engine, resp), nil
 	default:
 		return nil, fmt.Errorf("unknown net backend %q", cfg.NetBackend)
 	}

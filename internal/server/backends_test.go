@@ -55,12 +55,19 @@ func TestNewProtocolCodecRESP3(t *testing.T) {
 	}
 }
 
-func TestFutureBackendsFailFastInM0(t *testing.T) {
-	// eventloop should still fail (M4 scope)
-	cfg := config.ServerProperties{NetBackend: "eventloop", EngineBackend: "shardmap", ProtoMax: "resp2"}
-	NormalizeBackends(&cfg)
-	if _, err := NewNetServer(&cfg); err == nil {
-		t.Fatalf("eventloop returned nil error")
+func TestEventloopBackend(t *testing.T) {
+	cfg := &config.ServerProperties{NetBackend: "eventloop", EngineBackend: "shardmap", ProtoMax: "resp2"}
+	NormalizeBackends(cfg)
+	engine, err := NewStorageEngine(cfg)
+	if err != nil {
+		t.Fatalf("NewStorageEngine: %v", err)
+	}
+	srv, err := NewNetServerWithEngine(cfg, engine)
+	if err != nil {
+		t.Fatalf("NewNetServerWithEngine(eventloop): %v", err)
+	}
+	if srv == nil {
+		t.Fatal("NewNetServerWithEngine returned nil")
 	}
 }
 

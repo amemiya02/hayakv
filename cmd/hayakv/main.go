@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/amemiya02/hayakv/config"
+	"github.com/amemiya02/hayakv/internal/iface"
 	"github.com/amemiya02/hayakv/internal/lib/logger"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
 	stdserver "github.com/amemiya02/hayakv/internal/net/goroutine"
@@ -68,7 +69,7 @@ func main() {
 		return
 	}
 
-	netServer, err := server.NewNetServer(config.Properties)
+	netServer, err := server.NewNetServerWithEngine(config.Properties, engine)
 	if err != nil {
 		msg := fmt.Sprintf("configure net server failed: %v", err)
 		logger.Errorf("%s", msg)
@@ -82,6 +83,11 @@ func main() {
 		logger.Errorf("%s", msg)
 		fmt.Fprintln(os.Stderr, msg)
 		return
+	}
+
+	// For the eventloop backend, set the codec on the server directly.
+	if elServer, ok := netServer.(interface{ SetCodec(iface.ProtocolCodec) }); ok {
+		elServer.SetCodec(codec)
 	}
 
 	handler := stdserver.NewHandlerWithDB(engine, codec)
