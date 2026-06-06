@@ -191,6 +191,44 @@ proto-max %s
 	}
 }
 
+func startHayakvEventloop(t *testing.T) (string, func()) {
+	t.Helper()
+	root := projectRoot(t)
+	tmp := t.TempDir()
+	bin := filepath.Join(tmp, "hayakv")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/hayakv")
+	build.Dir = root
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build hayakv: %v\n%s", err, out)
+	}
+	port := freePort(t)
+	conf := filepath.Join(tmp, "redis.conf")
+	if err := os.WriteFile(conf, []byte(fmt.Sprintf(`bind 127.0.0.1
+port %d
+dir %s
+databases 16
+net eventloop
+engine shardmap
+proto-max resp2
+`, port, tmp)), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "CONFIG="+conf)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start hayakv: %v", err)
+	}
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	waitForPing(t, addr)
+	return addr, func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	}
+}
+
 func startRedis8(t *testing.T) (string, func()) {
 	t.Helper()
 	if addr := os.Getenv("HAYAKV_DIFF_REDIS_ADDR"); addr != "" {

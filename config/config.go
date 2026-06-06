@@ -57,6 +57,16 @@ type ServerProperties struct {
 	// If the node join the cluster as a replica of another node,
 	// set MasterInCluster as the RedisAdvertiseAddr of it's master node
 	MasterInCluster string `cfg:"master-in-cluster"`
+
+	// Encoding thresholds
+	HashMaxListpackEntries  int `cfg:"hash-max-listpack-entries"`
+	HashMaxListpackValue    int `cfg:"hash-max-listpack-value"`
+	SetMaxIntsetEntries     int `cfg:"set-max-intset-entries"`
+	SetMaxListpackEntries   int `cfg:"set-max-listpack-entries"`
+	SetMaxListpackValue     int `cfg:"set-max-listpack-value"`
+	ZSetMaxListpackEntries  int `cfg:"zset-max-listpack-entries"`
+	ZSetMaxListpackValue    int `cfg:"zset-max-listpack-value"`
+	ListMaxListpackSize     int `cfg:"list-max-listpack-size"`
 }
 
 var configFilePath string
@@ -102,6 +112,16 @@ func init() {
 		NetBackend:    "goroutine",
 		EngineBackend: "shardmap",
 		ProtoMax:      "resp2",
+
+		// Encoding thresholds (Redis defaults)
+		HashMaxListpackEntries: 128,
+		HashMaxListpackValue:   64,
+		SetMaxIntsetEntries:    512,
+		SetMaxListpackEntries:  128,
+		SetMaxListpackValue:    64,
+		ZSetMaxListpackEntries: 128,
+		ZSetMaxListpackValue:   64,
+		ListMaxListpackSize:    128,
 	}
 }
 
