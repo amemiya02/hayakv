@@ -8,8 +8,8 @@ import (
 )
 
 type Command struct {
-	Args       []string
-	Normalize  func([]byte) []byte // optional; applied before comparison
+	Args      []string
+	Normalize func([]byte) []byte // optional; applied before comparison
 }
 
 // sortRespArray parses a RESP array and returns a new RESP array with the
