@@ -407,6 +407,9 @@ func (server *Server) receiveAOF(ctx context.Context, configVersion int32) error
 			}
 			// Count bytes consumed from the master stream BEFORE acting, so the
 			// offset reflects everything received (GETACK included).
+			// replOffset counts the exact multibulk wire bytes the master appended
+			// to its backlog (MakeMultiBulkReply(...).ToBytes()); the parsed
+			// MultiBulkReply re-serializes identically, so offsets stay aligned.
 			n := len(cmdLine.ToBytes())
 			isGetAck := len(cmdLine.Args) >= 2 &&
 				strings.ToLower(string(cmdLine.Args[0])) == "replconf" &&

@@ -213,6 +213,99 @@ func TestDisklessFullResync(t *testing.T) {
 	pollGet(t, replica, "live", "after", 10*time.Second)
 }
 
+func TestPartialResyncAfterBriefDisconnect(t *testing.T) {
+	masterAddr, stopMaster := startHayakvRepl(t, "repl-backlog-size 1048576")
+	defer stopMaster()
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	if err := master.Set(ctx, "base", "0", 0).Err(); err != nil {
+		t.Fatalf("SET base: %v", err)
+	}
+	pollGet(t, replica, "base", "0", 10*time.Second)
+
+	replidBefore := extractInfoField(t, master, "master_replid:")
+
+	// Briefly detach and re-attach the replica. Re-issuing REPLICAOF to the same
+	// master triggers a reconnect; the replica retains replId/replOffset
+	// and the backlog still covers it, so data stays consistent.
+	if err := replica.Do(ctx, "REPLICAOF", "NO", "ONE").Err(); err != nil {
+		t.Fatalf("REPLICAOF NO ONE: %v", err)
+	}
+	// Write within the backlog window while detached.
+	if err := master.Set(ctx, "during", "1", 0).Err(); err != nil {
+		t.Fatalf("SET during: %v", err)
+	}
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("re-REPLICAOF: %v", err)
+	}
+	pollGet(t, replica, "during", "1", 10*time.Second)
+
+	// More live writes flow after resync.
+	if err := master.Set(ctx, "after", "2", 0).Err(); err != nil {
+		t.Fatalf("SET after: %v", err)
+	}
+	pollGet(t, replica, "after", "2", 10*time.Second)
+
+	// The master's replId is stable (no full-failover reset).
+	replidAfter := extractInfoField(t, master, "master_replid:")
+	if replidBefore != replidAfter {
+		t.Fatalf("master_replid changed %q -> %q (unexpected reset)", replidBefore, replidAfter)
+	}
+}
+
+func TestReplicaReconnectStaysConsistent(t *testing.T) {
+	masterAddr, stopMaster := startHayakvRepl(t, "repl-backlog-size 1048576")
+	defer stopMaster()
+	// Short repl-timeout so slaveCron reconnects quickly if the link stalls.
+	replicaAddr, stopReplica := startHayakvRepl(t, "repl-timeout 1")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	// Continuous writes across at least one 10s cron tick + reconnect cycles.
+	for i := 0; i < 200; i++ {
+		if err := master.Set(ctx, fmt.Sprintf("c%d", i), fmt.Sprintf("%d", i), 0).Err(); err != nil {
+			t.Fatalf("SET c%d: %v", i, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	pollGet(t, replica, "c0", "0", 15*time.Second)
+	pollGet(t, replica, "c199", "199", 15*time.Second)
+}
+
+func extractInfoField(t *testing.T, c *redis.Client, prefix string) string {
+	t.Helper()
+	info := c.Info(context.Background(), "replication").Val()
+	i := strings.Index(info, prefix)
+	if i < 0 {
+		t.Fatalf("INFO replication missing %q:\n%s", prefix, info)
+	}
+	rest := info[i+len(prefix):]
+	if j := strings.IndexAny(rest, "\r\n"); j >= 0 {
+		return rest[:j]
+	}
+	return rest
+}
+
 func TestWaitTimesOutWhenNotEnoughReplicas(t *testing.T) {
 	masterAddr, stopMaster := startHayakvRepl(t, "")
 	defer stopMaster()
