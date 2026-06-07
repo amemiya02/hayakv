@@ -102,7 +102,7 @@ func TestDecodeElemInvalid(t *testing.T) {
 		{"empty", []byte{}},
 		{"unknown tag", []byte{0xFF}},
 		{"truncated string", []byte{elemStr, 0x05}}, // length 5 but no data
-		{"truncated int", []byte{elemInt}},           // tag only
+		{"truncated int", []byte{elemInt}},          // tag only
 	}
 
 	for _, tt := range tests {
@@ -126,14 +126,14 @@ func TestIsInt(t *testing.T) {
 		{"-42", true, -42},
 		{"9223372036854775807", true, 9223372036854775807},
 		{"-9223372036854775807", true, -9223372036854775807},
-		{"007", false, 0},     // leading zeros
-		{"", false, 0},        // empty
-		{"abc", false, 0},     // not a number
-		{"12.34", false, 0},   // float
-		{" 42 ", false, 0},    // spaces
-		{"042", false, 0},     // leading zero
-		{"9223372036854775808", false, 0}, // overflow
-		{"+42", false, 0},     // Redis doesn't accept + prefix
+		{"007", false, 0},                  // leading zeros
+		{"", false, 0},                     // empty
+		{"abc", false, 0},                  // not a number
+		{"12.34", false, 0},                // float
+		{" 42 ", false, 0},                 // spaces
+		{"042", false, 0},                  // leading zero
+		{"9223372036854775808", false, 0},  // overflow
+		{"+42", false, 0},                  // Redis doesn't accept + prefix
 		{"-9223372036854775808", false, 0}, // overflow
 	}
 

@@ -53,9 +53,9 @@ type ServerProperties struct {
 	SlowLogSlowerThan int64 `cfg:"slowlog-log-slower-than"`
 	SlowLogMaxLen     int   `cfg:"slowlog-max-len"`
 
-	ClusterEnable     bool   `cfg:"cluster-enable"`
-	ClusterAsSeed     bool   `cfg:"cluster-as-seed"`
-	ClusterSeed       string `cfg:"cluster-seed"`
+	ClusterEnable bool   `cfg:"cluster-enable"`
+	ClusterAsSeed bool   `cfg:"cluster-as-seed"`
+	ClusterSeed   string `cfg:"cluster-seed"`
 	// Cluster flavor selector: "redis" => real Redis Cluster (internal/rediscluster);
 	// anything else (incl. empty) => legacy raft proxy (internal/cluster) for back-compat.
 	ClusterMode       string `cfg:"cluster-mode"`
@@ -67,14 +67,14 @@ type ServerProperties struct {
 	MasterInCluster string `cfg:"master-in-cluster"`
 
 	// Encoding thresholds
-	HashMaxListpackEntries  int `cfg:"hash-max-listpack-entries"`
-	HashMaxListpackValue    int `cfg:"hash-max-listpack-value"`
-	SetMaxIntsetEntries     int `cfg:"set-max-intset-entries"`
-	SetMaxListpackEntries   int `cfg:"set-max-listpack-entries"`
-	SetMaxListpackValue     int `cfg:"set-max-listpack-value"`
-	ZSetMaxListpackEntries  int `cfg:"zset-max-listpack-entries"`
-	ZSetMaxListpackValue    int `cfg:"zset-max-listpack-value"`
-	ListMaxListpackSize     int `cfg:"list-max-listpack-size"`
+	HashMaxListpackEntries int `cfg:"hash-max-listpack-entries"`
+	HashMaxListpackValue   int `cfg:"hash-max-listpack-value"`
+	SetMaxIntsetEntries    int `cfg:"set-max-intset-entries"`
+	SetMaxListpackEntries  int `cfg:"set-max-listpack-entries"`
+	SetMaxListpackValue    int `cfg:"set-max-listpack-value"`
+	ZSetMaxListpackEntries int `cfg:"zset-max-listpack-entries"`
+	ZSetMaxListpackValue   int `cfg:"zset-max-listpack-value"`
+	ListMaxListpackSize    int `cfg:"list-max-listpack-size"`
 
 	// M5: expiration + eviction
 	Maxmemory        int64  `cfg:"maxmemory"`         // bytes; 0 = unlimited. Accepts 100mb/1gb forms via fixup.
@@ -121,14 +121,14 @@ func init() {
 
 	// default config
 	Properties = &ServerProperties{
-		Bind:          "127.0.0.1",
-		Port:          6379,
-		AppendOnly:    false,
-		RunID:         utils.RandString(40),
-		NetBackend:    "goroutine",
-		EngineBackend: "shardmap",
-		ProtoMax:      "resp2",
-		RdbImpl:       "library",
+		Bind:           "127.0.0.1",
+		Port:           6379,
+		AppendOnly:     false,
+		RunID:          utils.RandString(40),
+		NetBackend:     "goroutine",
+		EngineBackend:  "shardmap",
+		ProtoMax:       "resp2",
+		RdbImpl:        "library",
 		AppendFilename: "appendonly.aof",
 		AppendDirname:  "appendonlydir",
 

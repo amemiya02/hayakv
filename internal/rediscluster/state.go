@@ -60,6 +60,12 @@ func (s *clusterState) imOwner(slot uint16) bool {
 func (s *clusterState) addSlots(slots []uint16) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(slots) > 0 {
+		// Bump epoch on first slot claim — needed for gossip-based
+		// ownership resolution (higher configEpoch wins).
+		s.epoch++
+		s.self.configEpoch = s.epoch
+	}
 	for _, sl := range slots {
 		s.slots[sl] = s.self
 		s.self.addSlot(sl)
@@ -85,6 +91,9 @@ func (s *clusterState) assignSlotToNode(slot uint16, id string) bool {
 	if n == nil {
 		return false
 	}
+	// Bump epoch so gossip can propagate the ownership change.
+	s.epoch++
+	n.configEpoch = s.epoch
 	if old := s.slots[slot]; old != nil {
 		old.delSlot(slot)
 	}

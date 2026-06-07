@@ -171,18 +171,10 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 	write, read := prepare(cmdLine[1:])
 
 	// --- M5 denyoom path (global memory critical section) ---
-	// maxmemory is a server-wide constraint.  memMu serialises the entire
-	// pre-check → execute → post-check/rollback sequence so that concurrent
-	// denyoom writes on different keys cannot both pass the pre-check and
-	// then interfere in post-check.
-	type keySnapshot struct {
-		entity     *database.DataEntity
-		expiry     time.Time
-		existed    bool
-		oldVersion uint32
-		oldLRU     lruMeta
-		hasLRU     bool
-	}
+	// maxmemory is a server-wide constraint.  memMu serialises the
+	// pre-check → execute sequence so that concurrent denyoom writes
+	// on different keys cannot both pass the pre-check.
+	// Redis only does pre-check (evict-or-reject); no post-check rollback.
 	isDenyOOMCmd := isDenyOOM(cmd) && db.server != nil &&
 		config.Properties.Maxmemory > 0
 
@@ -195,88 +187,11 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 			return oomErrReply()
 		}
 
-		// Lock keys BEFORE snapshot so no other writer can interleave.
 		db.RWLocks(write, read)
-
-		// Snapshot under key lock — reads are safe.
-		var snaps map[string]keySnapshot
-		if len(write) > 0 {
-			snaps = make(map[string]keySnapshot, len(write))
-			for _, k := range write {
-				s := keySnapshot{oldVersion: db.GetVersion(k)}
-				if raw, ok := db.data.GetWithLock(k); ok {
-					s.entity = raw.(*database.DataEntity)
-					s.existed = true
-				}
-				if raw, ok := db.ttlMap.Get(k); ok {
-					s.expiry = raw.(time.Time)
-				}
-				if raw, ok := db.lruMap.Get(k); ok {
-					s.oldLRU = raw.(lruMeta)
-					s.hasLRU = true
-				}
-				snaps[k] = s
-			}
-		}
-
-		// Bump versions AFTER snapshot — snapshot captures the pre-bump
-		// value so OOM rollback can restore it (WATCH must not see a
-		// spurious change for a command that never took effect).
+		defer db.RWUnLocks(write, read)
 		db.addVersion(write...)
 
-		// Buffer AOF writes so they can be discarded on rollback.
-		var aofBuf []CmdLine
-		if len(write) > 0 {
-			gid := goid()
-			aofBuffers.Store(gid, &aofBuf)
-			defer func() { aofBuffers.Delete(gid) }()
-		}
-
 		result := cmd.executor(db, cmdLine[1:])
-
-		// Release key locks BEFORE the post-check.  usedMemory() calls
-		// ForEach → RLock on every shard; if we still hold a write lock
-		// on any shard this deadlocks (Go RWMutex is not reentrant).
-		// memMu is still held so no concurrent denyoom can interfere.
-		db.RWUnLocks(write, read)
-
-		// Post-write check: rollback if still over limit.
-		if db.server.usedMemory() > config.Properties.Maxmemory {
-			for _, k := range write {
-				s := snaps[k]
-				if s.existed {
-					db.data.PutWithLock(k, s.entity)
-					if s.expiry.IsZero() {
-						db.ttlMap.Remove(k)
-					} else {
-						db.ttlMap.Put(k, s.expiry)
-						db.Expire(k, s.expiry)
-					}
-				} else {
-					db.data.RemoveWithLock(k)
-					db.ttlMap.Remove(k)
-				}
-				if s.hasLRU {
-					db.lruMap.Put(k, s.oldLRU)
-				} else {
-					db.lruMap.Remove(k)
-				}
-				if s.existed {
-					db.versionMap.Put(k, s.oldVersion)
-				} else {
-					db.removeVersion(k)
-				}
-			}
-			return oomErrReply()
-		}
-
-		// Success: flush buffered AOF to persister.
-		if len(aofBuf) > 0 {
-			aofBuffers.Delete(goid())
-			for _, line := range aofBuf {
-				db.addAof(line)
-			}
-		}
 
 		if c != nil && c.Protocol() == redis.RESP3 && cmdName == "hgetall" {
 			if mbr, ok := result.(*protocol.MultiBulkReply); ok {

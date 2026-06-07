@@ -13,7 +13,7 @@ import (
 type stubEngine struct{}
 
 func (stubEngine) Exec(_ iredis.Connection, _ iface.CmdLine) iredis.Reply { return nil }
-func (stubEngine) AfterClientClose(_ iredis.Connection)                  {}
+func (stubEngine) AfterClientClose(_ iredis.Connection)                   {}
 func (stubEngine) Close()                                                 {}
 
 func TestDefaultBackendNames(t *testing.T) {

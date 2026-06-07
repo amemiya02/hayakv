@@ -186,11 +186,10 @@ func evictionEnabled() bool {
 // eviction (same discipline as activeExpireCycle), so it is correct under the
 // goroutine+redisdb global-lock triangle and inline under eventloop.
 //
-// IMPORTANT: usedMemory() traverses all shards with RLock; evictOneKey() takes
-// a write lock on one shard.  Calling usedMemory() after evictOneKey() on the
-// same shard would deadlock (Go RWMutex is not reentrant).  We solve this by
-// computing currentMemory once and decrementing it incrementally as keys are
-// evicted, avoiding repeated full traversals.
+// We compute currentMemory once and decrement it incrementally as keys are
+// evicted, avoiding repeated full traversals (usedMemory is O(n) in the total
+// key count).  evictOneKeyWithSize returns with key locks already released, so
+// calling usedMemory() after it would not deadlock — but it would be wasteful.
 func (server *Server) freeMemoryIfNeeded() bool {
 	limit := config.Properties.Maxmemory
 	if limit <= 0 {

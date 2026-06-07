@@ -47,7 +47,7 @@ func m5Corpus() []Scenario {
 		{Name: "oom under noeviction", Commands: []Command{
 			{Args: []string{"CONFIG", "SET", "maxmemory-policy", "noeviction"}},
 			{Args: []string{"CONFIG", "SET", "maxmemory", "1"}}, // 1 byte -> instantly over
-			{Args: []string{"SET", "x", "y"}},                  // -OOM ...
+			{Args: []string{"SET", "x", "y"}},                   // -OOM ...
 			{Args: []string{"CONFIG", "SET", "maxmemory", "0"}}, // reset
 		}},
 		{Name: "config get policy roundtrip", Commands: []Command{

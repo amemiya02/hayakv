@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"strings"
-	"fmt"
 	"testing"
 	"time"
 

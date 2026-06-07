@@ -118,9 +118,8 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 	// M5: global memory critical section for transactions with denyoom
 	// commands.  Serialises with concurrent denyoom writes on other keys.
 	// Lock ordering: memMu → key locks (same as execNormalCommand).
-	isOOMTxn := hasDenyOOM && db.server != nil &&
-		config.Properties.Maxmemory > 0
-	if isOOMTxn {
+	// Redis only does pre-check (evict-or-reject); no post-check rollback.
+	if hasDenyOOM && db.server != nil && config.Properties.Maxmemory > 0 {
 		db.server.memMu.Lock()
 		defer db.server.memMu.Unlock()
 		if !db.server.freeMemoryIfNeeded() {
@@ -129,46 +128,7 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 	}
 
 	db.RWLocks(writeKeys, readKeys)
-	if !isOOMTxn {
-		// Non-OOM: normal defer unlock (no usedMemory post-check).
-		defer db.RWUnLocks(writeKeys, readKeys)
-	}
-	// OOM path: no defer — we manually release before the post-check
-	// usedMemory() call to avoid the shardmap deadlock (ForEach acquires
-	// per-shard RLock which conflicts with our write locks).
-	// Re-acquired for rollback if needed.
-
-	// M5: snapshot write-key metadata for OOM rollback.
-	// (undo logs restore data; snapshot restores version + LRU.)
-	type keyMeta struct {
-		existed    bool
-		oldVersion uint32
-		oldLRU     lruMeta
-		hasLRU     bool
-	}
-	var metaSnaps map[string]keyMeta
-	if isOOMTxn && len(writeKeys) > 0 {
-		metaSnaps = make(map[string]keyMeta, len(writeKeys))
-		for _, k := range writeKeys {
-			m := keyMeta{oldVersion: db.GetVersion(k)}
-			if _, ok := db.data.GetWithLock(k); ok {
-				m.existed = true
-			}
-			if raw, ok := db.lruMap.Get(k); ok {
-				m.oldLRU = raw.(lruMeta)
-				m.hasLRU = true
-			}
-			metaSnaps[k] = m
-		}
-	}
-
-	// M5: buffer AOF writes so they can be discarded on OOM rollback.
-	var aofBuf []CmdLine
-	if isOOMTxn && len(writeKeys) > 0 {
-		gid := goid()
-		aofBuffers.Store(gid, &aofBuf)
-		defer func() { aofBuffers.Delete(gid) }()
-	}
+	defer db.RWUnLocks(writeKeys, readKeys)
 
 	// execute
 	results := make([]redis.Reply, 0, len(cmdLines))
@@ -196,46 +156,12 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 		results = append(results, result)
 	}
 
-	// Release key locks BEFORE the post-check (OOM path only).
-	// usedMemory() calls ForEach → RLock on every shard; holding write
-	// locks here deadlocks.  memMu is still held so no concurrent
-	// denyoom can interfere.  Non-OOM path has a defer unlock above.
-	if isOOMTxn {
-		db.RWUnLocks(writeKeys, readKeys)
-	}
-
-	// M5: post-write OOM check.  The error might be OOM from a denyoom
-	// command inside the transaction, or a normal error.  Only do the
-	// full OOM rollback when we are in the OOM path AND memory is still
-	// over limit (the undo logs handle data; snapshot handles meta).
-	if isOOMTxn && db.server.usedMemory() > config.Properties.Maxmemory {
-		aborted = true
-	}
-
 	if !aborted { // success
-		if isOOMTxn {
-			// OOM path released locks before post-check; non-OOM has defer.
-			// Nothing to release here — locks are already released.
-		}
 		db.addVersion(writeKeys...)
-		// Flush buffered AOF to persister.
-		if len(aofBuf) > 0 {
-			aofBuffers.Delete(goid())
-			for _, line := range aofBuf {
-				db.addAof(line)
-			}
-		}
 		return protocol.MakeMultiRawReply(results)
 	}
 
 	// undo if aborted
-	if isOOMTxn {
-		// OOM path released locks above; re-acquire for rollback.
-		db.RWLocks(writeKeys, readKeys)
-		defer db.RWUnLocks(writeKeys, readKeys)
-	}
-	// Non-OOM: locks still held from above (defer will release).
-
 	size := len(undoCmdLines)
 	for i := size - 1; i >= 0; i-- {
 		curCmdLines := undoCmdLines[i]
@@ -247,23 +173,6 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 		}
 	}
 
-	// M5: restore version + LRU metadata after undo logs restored data.
-	if metaSnaps != nil {
-		for k, m := range metaSnaps {
-			if m.existed {
-				db.versionMap.Put(k, m.oldVersion)
-			} else {
-				db.removeVersion(k)
-			}
-			if m.hasLRU {
-				db.lruMap.Put(k, m.oldLRU)
-			} else {
-				db.lruMap.Remove(k)
-			}
-		}
-	}
-
-	// Discard buffered AOF entries.
 	return protocol.MakeErrReply("EXECABORT Transaction discarded because of previous errors.")
 }
 

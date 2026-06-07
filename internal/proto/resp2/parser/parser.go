@@ -155,8 +155,8 @@ func parseBulkString(header []byte, reader *bufio.Reader, ch chan<- *Payload) er
 
 // there is no CRLF between RDB and following AOF, therefore it needs to be treated differently.
 // Two framings are supported:
-//   1. length-prefixed: $<len>\r\n<len bytes>            (disk-based full resync)
-//   2. EOF-marked:      $EOF:<40-byte-mark>\r\n<bytes><mark>  (diskless full resync)
+//  1. length-prefixed: $<len>\r\n<len bytes>            (disk-based full resync)
+//  2. EOF-marked:      $EOF:<40-byte-mark>\r\n<bytes><mark>  (diskless full resync)
 func parseRDBBulkString(reader *bufio.Reader, ch chan<- *Payload) error {
 	header, err := reader.ReadBytes('\n')
 	if err != nil {

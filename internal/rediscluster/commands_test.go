@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/amemiya02/hayakv/internal/proto/resp2"
 	iredis "github.com/amemiya02/hayakv/internal/iface/redis"
+	"github.com/amemiya02/hayakv/internal/proto/resp2"
 )
 
 func enc(t *testing.T, r iredis.Reply) []byte {

@@ -42,7 +42,8 @@ type clusterMsgHeader struct {
 }
 
 // gossipEntry is one peer summary in the gossip section.
-//   id[40] ip[46] port[4] cport[4] flags[4]
+//
+//	id[40] ip[46] port[4] cport[4] flags[4]
 const (
 	ipFieldLen   = 46
 	gossipEntLen = idLen + ipFieldLen + 4 + 4 + 4

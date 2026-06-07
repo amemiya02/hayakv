@@ -32,9 +32,9 @@ func parseFloat(s string) (float64, error) {
 
 // Hash represents a hash object that can be encoded as listpack or hashtable
 type Hash struct {
-	listpack    *Listpack
-	hashtable   dict.Dict
-	isListpack  bool
+	listpack   *Listpack
+	hashtable  dict.Dict
+	isListpack bool
 }
 
 // NewHash creates a new hash object
@@ -624,15 +624,15 @@ func simpleRand() uint32 {
 
 // ZSet represents a sorted set object that can be encoded as listpack or skiplist
 type ZSet struct {
-	listpack  *Listpack
-	skiplist  *SortedSet
+	listpack   *Listpack
+	skiplist   *SortedSet
 	isListpack bool
 }
 
 // NewZSet creates a new sorted set object
 func NewZSet() *ZSet {
 	return &ZSet{
-		listpack:  NewListpack(),
+		listpack:   NewListpack(),
 		isListpack: true,
 	}
 }
@@ -1231,15 +1231,15 @@ func (z *ZSet) ZSetScan(cursor, count int, pattern string) ([][]byte, int) {
 
 // List represents a list object that can be encoded as listpack or quicklist
 type List struct {
-	listpack  *Listpack
-	quicklist *QuickList
+	listpack   *Listpack
+	quicklist  *QuickList
 	isListpack bool
 }
 
 // NewList creates a new list object
 func NewList() *List {
 	return &List{
-		listpack:  NewListpack(),
+		listpack:   NewListpack(),
 		isListpack: true,
 	}
 }

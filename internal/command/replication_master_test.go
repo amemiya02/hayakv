@@ -316,9 +316,9 @@ func TestReplicationMasterRewriteRDB(t *testing.T) {
 
 func TestBacklogTrimAdvancesBeginOffset(t *testing.T) {
 	b := &replBacklog{}
-	b.setLimit(8) // keep at most 8 bytes
-	b.appendBytes([]byte("abcd"))     // begin=0 cur=4 buf="abcd"
-	b.appendBytes([]byte("efgh"))     // begin=0 cur=8 buf="abcdefgh"
+	b.setLimit(8)                 // keep at most 8 bytes
+	b.appendBytes([]byte("abcd")) // begin=0 cur=4 buf="abcd"
+	b.appendBytes([]byte("efgh")) // begin=0 cur=8 buf="abcdefgh"
 	if b.beginOffset != 0 || b.currentOffset != 8 || string(b.buf) != "abcdefgh" {
 		t.Fatalf("pre-trim: begin=%d cur=%d buf=%q", b.beginOffset, b.currentOffset, b.buf)
 	}
@@ -338,7 +338,7 @@ func TestBacklogValidOffsetAfterTrim(t *testing.T) {
 	b := &replBacklog{}
 	b.setLimit(4)
 	b.appendBytes([]byte("abcdef")) // trims to "cdef", begin=2 cur=6
-	if b.isValidOffset(1) { // 1 < beginOffset(2): dropped, must be invalid
+	if b.isValidOffset(1) {         // 1 < beginOffset(2): dropped, must be invalid
 		t.Fatalf("offset 1 should be invalid after trim")
 	}
 	if !b.isValidOffset(2) { // == beginOffset: still in window

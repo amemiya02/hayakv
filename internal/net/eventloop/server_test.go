@@ -32,7 +32,7 @@ func (e *fakeEngine) Exec(client iredis.Connection, cmdLine iface.CmdLine) iredi
 }
 
 func (e *fakeEngine) AfterClientClose(client iredis.Connection) {}
-func (e *fakeEngine) Close()                                     {}
+func (e *fakeEngine) Close()                                    {}
 
 // fakeCodec implements iface.ProtocolCodec for tests.
 // It uses resp2 encoding (reply.ToBytes()).

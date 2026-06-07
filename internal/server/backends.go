@@ -3,14 +3,14 @@ package server
 import (
 	"fmt"
 	"path/filepath"
-	"time"
 	"strings"
+	"time"
 
 	"github.com/amemiya02/hayakv/config"
 	database "github.com/amemiya02/hayakv/internal/command"
-	ifaceDB "github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/datastruct/dict"
 	"github.com/amemiya02/hayakv/internal/iface"
+	ifaceDB "github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/net/eventloop"
 	goroutinenet "github.com/amemiya02/hayakv/internal/net/goroutine"
 	"github.com/amemiya02/hayakv/internal/proto/resp2"
@@ -19,12 +19,12 @@ import (
 )
 
 const (
-	NetGoroutine   = "goroutine"
-	NetEventLoop   = "eventloop"
-	EngineShardMap = "shardmap"
-	EngineRedisDB  = "redisdb"
-	ProtoRESP2     = "resp2"
-	ProtoRESP3     = "resp3"
+	NetGoroutine     = "goroutine"
+	NetEventLoop     = "eventloop"
+	EngineShardMap   = "shardmap"
+	EngineRedisDB    = "redisdb"
+	ProtoRESP2       = "resp2"
+	ProtoRESP3       = "resp3"
 	ClusterModeRedis = "redis"
 )
 

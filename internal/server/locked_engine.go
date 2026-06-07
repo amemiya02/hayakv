@@ -11,8 +11,8 @@ import (
 // serialising all Exec/AfterClientClose/Close calls.
 // Used for the redisdb engine which uses a single non-concurrent dict.
 type lockedEngine struct {
-	mu     sync.Mutex
-	inner  iface.StorageEngine
+	mu    sync.Mutex
+	inner iface.StorageEngine
 }
 
 // NewLockedEngine wraps an engine with a global lock.

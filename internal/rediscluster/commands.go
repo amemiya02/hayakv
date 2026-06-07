@@ -225,6 +225,8 @@ func (c *clusterCommands) handleAdmin(sub string, args [][]byte) iredis.Reply {
 			if cp, e2 := strconv.Atoi(string(args[2])); e2 == nil {
 				cport = cp
 			}
+		} else if cport > 65535 {
+			return protocol.MakeErrReply("ERR Invalid bus port: derived cport exceeds 65535; pass an explicit cport as the third argument")
 		}
 		if err := c.meetFn(string(args[0]), port, cport); err != nil {
 			return protocol.MakeErrReply("ERR " + err.Error())
@@ -239,7 +241,7 @@ func (c *clusterCommands) handleAdmin(sub string, args [][]byte) iredis.Reply {
 		selfID := c.state.self.id
 		c.state.mu.RUnlock()
 		if nodeID == selfID {
-			return protocol.MakeErrReply("ERR I can't forget myself")
+			return protocol.MakeErrReply("ERR I tried hard but I can't forget myself...")
 		}
 		c.state.forgetNode(nodeID)
 		_ = c.state.save()

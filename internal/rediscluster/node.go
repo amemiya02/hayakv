@@ -22,8 +22,8 @@ const (
 type clusterNode struct {
 	id          string // 40 hex chars
 	ip          string
-	port        int    // client (data-plane) port
-	cport       int    // cluster bus port = port + 10000
+	port        int // client (data-plane) port
+	cport       int // cluster bus port = port + 10000
 	flags       uint32
 	masterID    string // if a replica, the id of its master
 	configEpoch uint64
@@ -36,10 +36,9 @@ type clusterNode struct {
 func newNode(id, ip string, port int) *clusterNode {
 	cport := port + 10000
 	if cport > 65535 {
-		cport = port - 10000 // fall back to port - 10000 if port + 10000 overflows
-		if cport < 1 {
-			cport = port // last resort: use the same port
-		}
+		// Redis refuses to start if the bus port overflows.
+		// Panic here to surface misconfiguration early.
+		panic(fmt.Sprintf("cluster bus port %d (port %d + 10000) exceeds 65535", cport-port, port))
 	}
 	return &clusterNode{id: id, ip: ip, port: port, cport: cport, flags: flagMaster, linkUp: true}
 }
@@ -52,8 +51,8 @@ func genNodeID() string {
 	return hex.EncodeToString(b[:])
 }
 
-func (n *clusterNode) addSlot(slot uint16)  { n.slots[slot/8] |= 1 << (slot % 8) }
-func (n *clusterNode) delSlot(slot uint16)  { n.slots[slot/8] &^= 1 << (slot % 8) }
+func (n *clusterNode) addSlot(slot uint16) { n.slots[slot/8] |= 1 << (slot % 8) }
+func (n *clusterNode) delSlot(slot uint16) { n.slots[slot/8] &^= 1 << (slot % 8) }
 func (n *clusterNode) hasSlot(slot uint16) bool {
 	return n.slots[slot/8]&(1<<(slot%8)) != 0
 }

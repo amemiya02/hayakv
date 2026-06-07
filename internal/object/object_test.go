@@ -125,12 +125,12 @@ func TestMakeStringObjectRaw(t *testing.T) {
 func TestMakeStringObjectNonInt(t *testing.T) {
 	// These look like numbers but aren't valid ints
 	tests := []string{
-		"007",     // leading zeros
-		"042",     // leading zeros
-		"12.34",   // float
-		"abc",     // not a number
-		"+42",     // + prefix
-		" 42 ",    // spaces
+		"007",   // leading zeros
+		"042",   // leading zeros
+		"12.34", // float
+		"abc",   // not a number
+		"+42",   // + prefix
+		" 42 ",  // spaces
 	}
 
 	for _, input := range tests {

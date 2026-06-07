@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	stdatomic "sync/atomic"
 	"time"
 
 	"github.com/amemiya02/hayakv/config"
@@ -116,16 +117,17 @@ func (backlog *replBacklog) isValidOffset(offset int64) bool {
 }
 
 type masterStatus struct {
-	mu           sync.RWMutex
-	replId       string
-	backlog      *replBacklog
-	slaveMap     map[redis.Connection]*slaveClient
-	waitSlaves   map[*slaveClient]struct{}
-	onlineSlaves map[*slaveClient]struct{}
-	bgSaveState  uint8
-	rdbFilename  string
-	aofListener  *replAofListener
-	rewriting    atomic.Boolean
+	mu                sync.RWMutex
+	replId            string
+	backlog           *replBacklog
+	slaveMap          map[redis.Connection]*slaveClient
+	waitSlaves        map[*slaveClient]struct{}
+	onlineSlaves      map[*slaveClient]struct{}
+	bgSaveState       uint8
+	rdbFilename       string
+	aofListener       *replAofListener
+	rewriting         atomic.Boolean
+	rdbSnapshotOffset int64 // replication offset at which the RDB was taken
 }
 
 // bgSaveForReplication does bg-save and send rdb to waiting slaves
@@ -153,6 +155,10 @@ func (server *Server) saveForReplication() error {
 	server.masterStatus.mu.Lock()
 	server.masterStatus.bgSaveState = bgSaveRunning
 	server.masterStatus.rdbFilename = rdbFilename // todo: can reuse config.Properties.RDBFilename?
+	// Capture the snapshot offset now (before RDB generation starts) so
+	// that even if trim advances beginOffset during the save, we record
+	// the correct replication point.
+	server.masterStatus.rdbSnapshotOffset = server.masterStatus.backlog.beginOffset
 	aofListener := &replAofListener{
 		mdb:     server,
 		backlog: server.masterStatus.backlog,
@@ -200,12 +206,19 @@ func (server *Server) rewriteRDB() error {
 		backlog: newBacklog,
 		mdb:     server,
 	}
+	// snapshotOffset captures the replication offset at the RDB snapshot
+	// point.  We defer writing it to masterStatus until the swap critical
+	// section below so that rdbSnapshotOffset, rdbFilename, and backlog
+	// are all updated atomically — no window where a concurrent full-sync
+	// reads a new offset with an old RDB file.
+	var snapshotOffset int64
 	hook := func() {
 		// pausing aof first, then lock masterStatus.
 		// use the same order as replAofListener to avoid dead lock
 		server.masterStatus.mu.Lock()
 		defer server.masterStatus.mu.Unlock()
 		newBacklog.beginOffset = server.masterStatus.backlog.currentOffset
+		snapshotOffset = server.masterStatus.backlog.currentOffset
 	}
 	err = server.persister.GenerateRDBForReplication(rdbFilename, aofListener, hook)
 	if err != nil { // wait rdb result
@@ -214,6 +227,7 @@ func (server *Server) rewriteRDB() error {
 	server.masterStatus.mu.Lock()
 	server.masterStatus.rdbFilename = rdbFilename
 	server.masterStatus.backlog = newBacklog
+	server.masterStatus.rdbSnapshotOffset = snapshotOffset
 	server.persister.RemoveListener(server.masterStatus.aofListener)
 	server.masterStatus.aofListener = aofListener
 	server.masterStatus.mu.Unlock()
@@ -225,9 +239,38 @@ func (server *Server) rewriteRDB() error {
 
 // masterFullReSyncWithSlave send replication header, rdb file and all backlogs to slave
 func (server *Server) masterFullReSyncWithSlave(slave *slaveClient) error {
-	// write replication header
-	header := "+FULLRESYNC " + server.masterStatus.replId + " " +
-		strconv.FormatInt(server.masterStatus.backlog.beginOffset, 10) + protocol.CRLF
+	// Use rdbSnapshotOffset (the replication offset at which the RDB was
+	// taken) for the FULLRESYNC header.  beginOffset may have advanced past
+	// this via trimBacklog, which would cause the slave to miss the range
+	// [rdbSnapshotOffset, beginOffset).
+	server.masterStatus.mu.RLock()
+	snapOffset := server.masterStatus.rdbSnapshotOffset
+	backlogCovers := server.masterStatus.backlog.isValidOffset(snapOffset)
+	server.masterStatus.mu.RUnlock()
+
+	if !backlogCovers {
+		// Backlog was trimmed past the snapshot point; rewrite to get a
+		// fresh RDB + backlog pair before we can full-sync.
+		// CAS prevents concurrent full-syncs from both triggering rewriteRDB.
+		if stdatomic.CompareAndSwapUint32((*uint32)(&server.masterStatus.rewriting), 0, 1) {
+			err := server.rewriteRDB()
+			server.masterStatus.rewriting.Set(false)
+			if err != nil {
+				return fmt.Errorf("rewrite RDB before full resync failed: %v", err)
+			}
+		}
+		// Re-read after (possibly someone else's) rewrite completed.
+		server.masterStatus.mu.RLock()
+		snapOffset = server.masterStatus.rdbSnapshotOffset
+		server.masterStatus.mu.RUnlock()
+	}
+
+	// write replication header (replId is immutable after init, safe to read without lock)
+	server.masterStatus.mu.RLock()
+	replId := server.masterStatus.replId
+	server.masterStatus.mu.RUnlock()
+	header := "+FULLRESYNC " + replId + " " +
+		strconv.FormatInt(snapOffset, 10) + protocol.CRLF
 	_, err := slave.conn.Write([]byte(header))
 	if err != nil {
 		return fmt.Errorf("write replication header to slave failed: %v", err)
@@ -244,6 +287,13 @@ func (server *Server) masterFullReSyncWithSlave(slave *slaveClient) error {
 	}
 	// send backlog
 	server.masterStatus.mu.RLock()
+	// Re-check coverage after the (potentially slow) RDB transfer.
+	// If trim advanced beginOffset past snapOffset during the transfer,
+	// the backlog no longer covers what the header promised.
+	if !server.masterStatus.backlog.isValidOffset(snapOffset) {
+		server.masterStatus.mu.RUnlock()
+		return fmt.Errorf("backlog trimmed during RDB transfer; slave must reconnect")
+	}
 	backlog, currentOffset := server.masterStatus.backlog.getSnapshot()
 	server.masterStatus.mu.RUnlock()
 	if _, err = slave.conn.Write(backlog); err != nil {
@@ -255,12 +305,19 @@ func (server *Server) masterFullReSyncWithSlave(slave *slaveClient) error {
 
 // masterDiskSendRDB writes the RDB as $<size>\r\n<bytes> from the temp file.
 func (server *Server) masterDiskSendRDB(slave *slaveClient) error {
-	rdbFile, err := os.Open(server.masterStatus.rdbFilename)
+	// Read filename under lock so it can't change between Open and Stat.
+	server.masterStatus.mu.RLock()
+	rdbFilename := server.masterStatus.rdbFilename
+	server.masterStatus.mu.RUnlock()
+	rdbFile, err := os.Open(rdbFilename)
 	if err != nil {
-		return fmt.Errorf("open rdb file %s for replication error: %v", server.masterStatus.rdbFilename, err)
+		return fmt.Errorf("open rdb file %s for replication error: %v", rdbFilename, err)
 	}
 	defer rdbFile.Close()
-	rdbInfo, _ := os.Stat(server.masterStatus.rdbFilename)
+	rdbInfo, err := rdbFile.Stat()
+	if err != nil {
+		return fmt.Errorf("stat rdb file %s for replication error: %v", rdbFilename, err)
+	}
 	rdbHeader := "$" + strconv.FormatInt(rdbInfo.Size(), 10) + protocol.CRLF
 	if _, err = slave.conn.Write([]byte(rdbHeader)); err != nil {
 		return fmt.Errorf("write rdb header to slave failed: %v", err)
@@ -414,6 +471,10 @@ func (server *Server) execReplConf(c redis.Connection, args [][]byte) redis.Repl
 		value := string(args[i+1])
 		switch key {
 		case "ack":
+			if slave == nil {
+				// Real Redis silently ignores ACK from non-slave connections.
+				return &protocol.NoReply{}
+			}
 			offset, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
 				return protocol.MakeErrReply("ERR value is not an integer or out of range")

@@ -438,13 +438,17 @@ func reverseBits(val uint64) uint64 {
 // The outer lockedEngine (for goroutine net) or single-threaded eventloop
 // provides the concurrency guarantee, so these delegate to the plain methods.
 
-func (d *RedisDict) GetWithLock(key string) (interface{}, bool)           { return d.Get(key) }
-func (d *RedisDict) PutWithLock(key string, val interface{}) int          { return d.Put(key, val) }
-func (d *RedisDict) PutIfAbsentWithLock(key string, val interface{}) int  { return d.PutIfAbsent(key, val) }
-func (d *RedisDict) PutIfExistsWithLock(key string, val interface{}) int  { return d.PutIfExists(key, val) }
-func (d *RedisDict) RemoveWithLock(key string) (interface{}, int)         { return d.Remove(key) }
-func (d *RedisDict) RWLocks(writeKeys []string, readKeys []string)        {}
-func (d *RedisDict) RWUnLocks(writeKeys []string, readKeys []string)      {}
+func (d *RedisDict) GetWithLock(key string) (interface{}, bool)  { return d.Get(key) }
+func (d *RedisDict) PutWithLock(key string, val interface{}) int { return d.Put(key, val) }
+func (d *RedisDict) PutIfAbsentWithLock(key string, val interface{}) int {
+	return d.PutIfAbsent(key, val)
+}
+func (d *RedisDict) PutIfExistsWithLock(key string, val interface{}) int {
+	return d.PutIfExists(key, val)
+}
+func (d *RedisDict) RemoveWithLock(key string) (interface{}, int)    { return d.Remove(key) }
+func (d *RedisDict) RWLocks(writeKeys []string, readKeys []string)   {}
+func (d *RedisDict) RWUnLocks(writeKeys []string, readKeys []string) {}
 
 // DictScan implements cursor-based scanning. The cursor represents
 // the next table index to scan. Returns (keys, nextCursor) where

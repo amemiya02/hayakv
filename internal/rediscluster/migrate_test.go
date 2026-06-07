@@ -76,36 +76,38 @@ func itoa(s uint16) string { return strconv.Itoa(int(s)) }
 
 type okEngine struct{}
 
-func (okEngine) Exec(_ iredis.Connection, _ iface.CmdLine) iredis.Reply { return protocol.MakeOkReply() }
-func (okEngine) AfterClientClose(iredis.Connection)                     {}
-func (okEngine) Close()                                                 {}
+func (okEngine) Exec(_ iredis.Connection, _ iface.CmdLine) iredis.Reply {
+	return protocol.MakeOkReply()
+}
+func (okEngine) AfterClientClose(iredis.Connection) {}
+func (okEngine) Close()                             {}
 
 // connStub is a minimal iredis.Connection with a fixed remote addr (for ASKING).
 type connStub string
 
-func (connStub) Write([]byte) (int, error) { return 0, nil }
-func (connStub) Close() error              { return nil }
-func (c connStub) RemoteAddr() string      { return string(c) }
-func (connStub) SetPassword(string)        {}
-func (connStub) GetPassword() string       { return "" }
-func (connStub) Subscribe(string)          {}
-func (connStub) UnSubscribe(string)        {}
-func (connStub) SubsCount() int            { return 0 }
-func (connStub) GetChannels() []string     { return nil }
-func (connStub) InMultiState() bool        { return false }
-func (connStub) SetMultiState(bool)        {}
-func (connStub) GetQueuedCmdLine() [][][]byte { return nil }
-func (connStub) EnqueueCmd([][]byte)       {}
-func (connStub) ClearQueuedCmds()          {}
+func (connStub) Write([]byte) (int, error)      { return 0, nil }
+func (connStub) Close() error                   { return nil }
+func (c connStub) RemoteAddr() string           { return string(c) }
+func (connStub) SetPassword(string)             {}
+func (connStub) GetPassword() string            { return "" }
+func (connStub) Subscribe(string)               {}
+func (connStub) UnSubscribe(string)             {}
+func (connStub) SubsCount() int                 { return 0 }
+func (connStub) GetChannels() []string          { return nil }
+func (connStub) InMultiState() bool             { return false }
+func (connStub) SetMultiState(bool)             {}
+func (connStub) GetQueuedCmdLine() [][][]byte   { return nil }
+func (connStub) EnqueueCmd([][]byte)            {}
+func (connStub) ClearQueuedCmds()               {}
 func (connStub) GetWatching() map[string]uint32 { return nil }
-func (connStub) AddTxError(error)          {}
-func (connStub) GetTxErrors() []error      { return nil }
-func (connStub) GetDBIndex() int           { return 0 }
-func (connStub) SelectDB(int)              {}
-func (connStub) Protocol() iredis.RespVersion { return iredis.RESP2 }
+func (connStub) AddTxError(error)               {}
+func (connStub) GetTxErrors() []error           { return nil }
+func (connStub) GetDBIndex() int                { return 0 }
+func (connStub) SelectDB(int)                   {}
+func (connStub) Protocol() iredis.RespVersion   { return iredis.RESP2 }
 func (connStub) SetProtocol(iredis.RespVersion) {}
-func (connStub) SetSlave()                 {}
-func (connStub) IsSlave() bool             { return false }
-func (connStub) SetMaster()                {}
-func (connStub) IsMaster() bool            { return false }
-func (connStub) Name() string              { return "" }
+func (connStub) SetSlave()                      {}
+func (connStub) IsSlave() bool                  { return false }
+func (connStub) SetMaster()                     {}
+func (connStub) IsMaster() bool                 { return false }
+func (connStub) Name() string                   { return "" }
