@@ -2,6 +2,7 @@ package database
 
 import (
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/amemiya02/hayakv/config"
@@ -134,4 +135,154 @@ func usingLFU() bool {
 		return true
 	}
 	return false
+}
+
+// maxLoops on the eviction loop so we never spin forever if the estimator and
+// maxmemory disagree about reachable headroom.
+const maxEvictLoops = 100000
+
+// evictionEnabled reports whether maxmemory is set AND policy is not noeviction.
+func evictionEnabled() bool {
+	return config.Properties.Maxmemory > 0 &&
+		config.Properties.MaxmemoryPolicy != "noeviction" &&
+		config.Properties.MaxmemoryPolicy != ""
+}
+
+// freeMemoryIfNeeded evicts keys until usedMemory <= maxmemory, per the active
+// policy. Returns true if memory is within budget afterwards (or no limit set),
+// false if it could not free enough (noeviction over-limit, or nothing evictable).
+//
+// Runs on the command/cron goroutine, taking per-key write locks for each
+// eviction (same discipline as activeExpireCycle), so it is correct under the
+// goroutine+redisdb global-lock triangle and inline under eventloop.
+func (server *Server) freeMemoryIfNeeded() bool {
+	limit := config.Properties.Maxmemory
+	if limit <= 0 {
+		return true // unlimited
+	}
+	if server.usedMemory() <= limit {
+		return true
+	}
+	if config.Properties.MaxmemoryPolicy == "noeviction" || config.Properties.MaxmemoryPolicy == "" {
+		return false
+	}
+	for loops := 0; loops < maxEvictLoops; loops++ {
+		if server.usedMemory() <= limit {
+			return true
+		}
+		evicted := server.evictOneKey()
+		if !evicted {
+			return false // nothing left to evict
+		}
+	}
+	return server.usedMemory() <= limit
+}
+
+// evictOneKey selects and removes a single best-candidate key across all dbs.
+// Returns false if no eligible key exists under the policy.
+func (server *Server) evictOneKey() bool {
+	policy := config.Properties.MaxmemoryPolicy
+	volatile := strings.HasPrefix(policy, "volatile-")
+	samples := config.Properties.MaxmemorySamples
+	if samples <= 0 {
+		samples = 5
+	}
+	for i := range server.dbSet {
+		db := server.mustSelectDB(i)
+		src := db.data
+		if volatile {
+			src = db.ttlMap
+		}
+		if src.Len() == 0 {
+			continue
+		}
+		sample := src.RandomDistinctKeys(samples)
+		if len(sample) == 0 {
+			continue
+		}
+		best := db.evictionCandidates(sample)
+		if best == "" {
+			continue
+		}
+		db.RWLocks([]string{best}, nil)
+		db.Remove(best)
+		db.addAof(toExpireDelAof(best))
+		db.RWUnLocks([]string{best}, nil)
+		return true
+	}
+	return false
+}
+
+// evictionCandidates picks the single best eviction target from sample under the
+// active policy: lru->largest idle, lfu->smallest counter, ttl->soonest expiry,
+// random->first. Returns "" if sample is empty.
+func (db *DB) evictionCandidates(sample []string) string {
+	if len(sample) == 0 {
+		return ""
+	}
+	policy := config.Properties.MaxmemoryPolicy
+	switch {
+	case strings.HasSuffix(policy, "-random"):
+		return sample[0]
+	case strings.HasSuffix(policy, "-ttl"):
+		// evict the key with the nearest expiration (smallest expireAt)
+		best := ""
+		var bestAt time.Time
+		for _, k := range sample {
+			raw, ok := db.ttlMap.Get(k)
+			if !ok {
+				continue
+			}
+			at, _ := raw.(time.Time)
+			if best == "" || at.Before(bestAt) {
+				best, bestAt = k, at
+			}
+		}
+		if best == "" {
+			return sample[0]
+		}
+		return best
+	case strings.HasSuffix(policy, "-lfu"):
+		best := ""
+		var bestCounter uint8 = 255
+		for _, k := range sample {
+			c := db.keyLFUCounter(k)
+			if best == "" || c < bestCounter {
+				best, bestCounter = k, c
+			}
+		}
+		return best
+	default: // -lru
+		best := ""
+		var bestIdle uint32
+		now := lruClock()
+		for _, k := range sample {
+			idle := db.keyIdle(now, k)
+			if best == "" || idle > bestIdle {
+				best, bestIdle = k, idle
+			}
+		}
+		return best
+	}
+}
+
+// keyIdle returns the LRU idle (in clock units) for key; keys with no recorded
+// access are treated as maximally idle (evict first).
+func (db *DB) keyIdle(now uint32, key string) uint32 {
+	raw, ok := db.lruMap.Get(key)
+	if !ok {
+		return lruClockMax
+	}
+	m := raw.(lruMeta)
+	return lruIdleFor(now, m.lruValue())
+}
+
+// keyLFUCounter returns the (decayed) LFU counter for key; keys with no record
+// are treated as counter 0 (evict first).
+func (db *DB) keyLFUCounter(key string) uint8 {
+	raw, ok := db.lruMap.Get(key)
+	if !ok {
+		return 0
+	}
+	return lfuDecay(raw.(lruMeta))
 }
