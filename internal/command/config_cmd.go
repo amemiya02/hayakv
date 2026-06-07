@@ -6,6 +6,7 @@ import (
 
 	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
+	"github.com/amemiya02/hayakv/internal/lib/wildcard"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
 
@@ -34,21 +35,49 @@ func execConfig(args [][]byte) redis.Reply {
 }
 
 // configGet returns name/value byte pairs for the (possibly wildcard) param.
-// Only the four eviction/cron parameters are modeled.
+// Supports glob patterns (e.g. "maxmemory*", "*") via internal/lib/wildcard.
 func configGet(param string) [][]byte {
 	known := map[string]func() string{
-		"maxmemory":         func() string { return strconv.FormatInt(config.Properties.Maxmemory, 10) },
-		"maxmemory-policy":  func() string { return config.Properties.MaxmemoryPolicy },
-		"maxmemory-samples": func() string { return strconv.Itoa(config.Properties.MaxmemorySamples) },
-		"hz":                func() string { return strconv.Itoa(config.Properties.Hz) },
+		"maxmemory":                 func() string { return strconv.FormatInt(config.Properties.Maxmemory, 10) },
+		"maxmemory-policy":          func() string { return config.Properties.MaxmemoryPolicy },
+		"maxmemory-samples":         func() string { return strconv.Itoa(config.Properties.MaxmemorySamples) },
+		"hz":                        func() string { return strconv.Itoa(config.Properties.Hz) },
+		"appendonly":                func() string { return boolToYesNo(config.Properties.AppendOnly) },
+		"databases":                 func() string { return strconv.Itoa(config.Properties.Databases) },
+		"save":                      func() string { return "" },
+		"list-max-listpack-size":    func() string { return strconv.Itoa(config.Properties.ListMaxListpackSize) },
+		"hash-max-listpack-entries": func() string { return strconv.Itoa(config.Properties.HashMaxListpackEntries) },
+		"set-max-intset-entries":    func() string { return strconv.Itoa(config.Properties.SetMaxIntsetEntries) },
+		"zset-max-listpack-entries": func() string { return strconv.Itoa(config.Properties.ZSetMaxListpackEntries) },
 	}
+
+	// Build the matching predicate. If param contains a wildcard character, use
+	// the compiled wildcard matcher; otherwise do an exact match (fast path).
+	var matches func(string) bool
+	if strings.ContainsAny(param, "*?[]") {
+		pat, err := wildcard.CompilePattern(param)
+		if err != nil {
+			return nil
+		}
+		matches = pat.IsMatch
+	} else {
+		matches = func(name string) bool { return name == param }
+	}
+
 	var out [][]byte
 	for name, getter := range known {
-		if param == name || param == "*" {
+		if matches(name) {
 			out = append(out, []byte(name), []byte(getter()))
 		}
 	}
 	return out
+}
+
+func boolToYesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
 
 func configSet(param, value string) redis.Reply {
@@ -76,6 +105,15 @@ func configSet(param, value string) redis.Reply {
 			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'hz'")
 		}
 		config.Properties.Hz = n
+	case "appendonly":
+		switch strings.ToLower(value) {
+		case "yes", "1":
+			config.Properties.AppendOnly = true
+		case "no", "0":
+			config.Properties.AppendOnly = false
+		default:
+			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'appendonly'")
+		}
 	default:
 		// Unknown-but-tolerated: Redis accepts many params we don't model.
 		return protocol.MakeOkReply()

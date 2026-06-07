@@ -40,3 +40,25 @@ func TestConfigSetMaxmemoryByteSuffix(t *testing.T) {
 	}
 	execConfig([][]byte{[]byte("SET"), []byte("maxmemory"), []byte("0")})
 }
+
+func TestConfigGetReturnsSuiteParams(t *testing.T) {
+	for _, p := range []string{"maxmemory", "maxmemory-policy", "appendonly",
+		"list-max-listpack-size", "hash-max-listpack-entries", "set-max-intset-entries", "zset-max-listpack-entries"} {
+		if len(configGet(p)) == 0 {
+			t.Fatalf("CONFIG GET %s returned nothing", p)
+		}
+	}
+}
+
+func TestConfigGetWildcard(t *testing.T) {
+	// "maxmemory*" should match maxmemory, maxmemory-policy, maxmemory-samples
+	result := configGet("maxmemory*")
+	if len(result) < 6 { // at least 3 key-value pairs = 6 entries
+		t.Fatalf("CONFIG GET maxmemory* returned too few results: %d entries", len(result))
+	}
+	// "*" should match everything
+	all := configGet("*")
+	if len(all) < 10 { // at least 5 known params
+		t.Fatalf("CONFIG GET * returned too few results: %d entries", len(all))
+	}
+}

@@ -26,7 +26,7 @@ func Ping(c redis.Connection, args [][]byte) redis.Reply {
 // Info the information of the godis server returned by the INFO command
 func Info(db *Server, args [][]byte) redis.Reply {
 	if len(args) == 0 {
-		infoCommandList := [...]string{"server", "client", "replication", "cluster", "keyspace"}
+		infoCommandList := [...]string{"server", "clients", "memory", "persistence", "replication", "cluster", "keyspace"}
 		var allSection []byte
 		for _, s := range infoCommandList {
 			allSection = append(allSection, GenGodisInfoString(s, db)...)
@@ -38,8 +38,12 @@ func Info(db *Server, args [][]byte) redis.Reply {
 		case "server":
 			reply := GenGodisInfoString("server", db)
 			return protocol.MakeBulkReply(reply)
-		case "client":
-			return protocol.MakeBulkReply(GenGodisInfoString("client", db))
+		case "client", "clients":
+			return protocol.MakeBulkReply(GenGodisInfoString("clients", db))
+		case "memory":
+			return protocol.MakeBulkReply(GenGodisInfoString("memory", db))
+		case "persistence":
+			return protocol.MakeBulkReply(GenGodisInfoString("persistence", db))
 		case "replication":
 			return protocol.MakeBulkReply(GenGodisInfoString("replication", db))
 		case "cluster":
@@ -86,6 +90,7 @@ func GenGodisInfoString(section string, db *Server) []byte {
 	switch section {
 	case "server":
 		s := fmt.Sprintf("# Server\r\n"+
+			"redis_version:%s\r\n"+
 			"godis_version:%s\r\n"+
 			//"godis_git_sha1:%s\r\n"+
 			//"godis_git_dirty:%d\r\n"+
@@ -100,9 +105,11 @@ func GenGodisInfoString(section string, db *Server) []byte {
 			"tcp_port:%d\r\n"+
 			"uptime_in_seconds:%d\r\n"+
 			"uptime_in_days:%d\r\n"+
+			"io_threads_active:%d\r\n"+
 			//"hz:%d\r\n"+
 			//"lru_clock:%d\r\n"+
 			"config_file:%s\r\n",
+			"8.0.0",
 			godisVersion,
 			//TODO,
 			//TODO,
@@ -117,11 +124,12 @@ func GenGodisInfoString(section string, db *Server) []byte {
 			config.Properties.Port,
 			startUpTimeFromNow,
 			startUpTimeFromNow/time.Duration(3600*24),
+			0,
 			//TODO,
 			//TODO,
 			config.GetConfigFilePath())
 		return []byte(s)
-	case "client":
+	case "clients":
 		s := fmt.Sprintf("# Clients\r\n"+
 			"connected_clients:%d\r\n",
 			//"client_recent_max_input_buffer:%d\r\n"+
@@ -131,6 +139,32 @@ func GenGodisInfoString(section string, db *Server) []byte {
 			//TODO,
 			//TODO,
 			//TODO,
+		)
+		return []byte(s)
+	case "memory":
+		s := fmt.Sprintf("# Memory\r\n"+
+			"maxmemory:%d\r\n"+
+			"maxmemory_policy:%s\r\n"+
+			"maxmemory_samples:%d\r\n",
+			config.Properties.Maxmemory,
+			config.Properties.MaxmemoryPolicy,
+			config.Properties.MaxmemorySamples,
+		)
+		return []byte(s)
+	case "persistence":
+		aofEnabled := 0
+		if config.Properties.AppendOnly {
+			aofEnabled = 1
+		}
+		s := fmt.Sprintf("# Persistence\r\n"+
+			"loading:%d\r\n"+
+			"rdb_bgsave_in_progress:%d\r\n"+
+			"aof_enabled:%d\r\n"+
+			"rdb_last_save_time:%d\r\n",
+			0,
+			0,
+			aofEnabled,
+			0,
 		)
 		return []byte(s)
 	case "cluster":

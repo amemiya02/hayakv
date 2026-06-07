@@ -1,12 +1,14 @@
 package database
 
 import (
+	"strings"
+	"testing"
+
 	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol/asserts"
 	"github.com/amemiya02/hayakv/internal/server/connection"
 	"math/rand"
-	"testing"
 	"time"
 )
 
@@ -60,6 +62,17 @@ func TestInfo(t *testing.T) {
 	asserts.AssertErrReply(t, ret, "ERR wrong number of arguments for 'info' command")
 	ret = testServer.Exec(c, utils.ToCmdLine("INFO", "abc"))
 	asserts.AssertErrReply(t, ret, "Invalid section for 'info' command")
+}
+
+func TestInfoHasSuiteRequiredFields(t *testing.T) {
+	s := NewStandaloneServer()
+	body := string(Info(s, nil).ToBytes())
+	for _, f := range []string{"run_id:", "tcp_port:", "uptime_in_seconds:", "redis_version:",
+		"io_threads_active:", "rdb_bgsave_in_progress:", "loading:", "aof_enabled:", "maxmemory_policy:"} {
+		if !strings.Contains(body, f) {
+			t.Fatalf("INFO missing %q", f)
+		}
+	}
 }
 
 func TestDbSize(t *testing.T) {
