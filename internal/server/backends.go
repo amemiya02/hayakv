@@ -16,6 +16,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/proto/resp2"
 	"github.com/amemiya02/hayakv/internal/proto/resp3"
 	"github.com/amemiya02/hayakv/internal/rediscluster"
+	iscript "github.com/amemiya02/hayakv/internal/script"
 )
 
 const (
@@ -43,12 +44,22 @@ func NormalizeBackends(cfg *config.ServerProperties) {
 	cfg.ProtoMax = strings.ToLower(cfg.ProtoMax)
 }
 
+// NewScriptEngine creates a ScriptEngine with the given invoker callback.
+func NewScriptEngine(cfg *config.ServerProperties, inv iface.ScriptInvoker) iface.ScriptEngine {
+	busy := cfg.BusyReplyThreshold
+	if busy <= 0 {
+		busy = 5000
+	}
+	return iscript.NewEngine(inv, busy)
+}
+
 func NewStorageEngine(cfg *config.ServerProperties) (iface.StorageEngine, error) {
 	NormalizeBackends(cfg)
 	switch cfg.EngineBackend {
 	case EngineShardMap:
 		dict.SetEngine("shardmap")
 		inner := database.NewStandaloneServer()
+		inner.SetScriptEngine(NewScriptEngine(cfg, inner.ExecFromScript))
 		if cfg.NetBackend == NetGoroutine {
 			inner.StartCron()
 		}
@@ -56,6 +67,7 @@ func NewStorageEngine(cfg *config.ServerProperties) (iface.StorageEngine, error)
 	case EngineRedisDB:
 		dict.SetEngine("redisdb")
 		inner := database.NewStandaloneServer()
+		inner.SetScriptEngine(NewScriptEngine(cfg, inner.ExecFromScript))
 		// For goroutine backend, wrap with a global lock since
 		// redisdb uses a single non-sharded dict.
 		if cfg.NetBackend == NetGoroutine {

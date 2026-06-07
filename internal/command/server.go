@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/hayakv/config"
+	"github.com/amemiya02/hayakv/internal/iface"
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/logger"
@@ -18,6 +19,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/persist/aof"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 	"github.com/amemiya02/hayakv/internal/pubsub"
+	iscript "github.com/amemiya02/hayakv/internal/script"
 )
 
 var godisVersion = "1.2.8" // do not modify
@@ -60,11 +62,25 @@ type Server struct {
 	// constraint — concurrent denyoom writes on different keys must not
 	// both pass the pre-check and then interfere in post-check.
 	memMu sync.Mutex
+
+	// scriptEngine provides EVAL/EVALSHA/SCRIPT support.
+	scriptEngine iface.ScriptEngine
 }
 
 // DisableCron prevents StartCron from launching a background goroutine.
 // Called when the eventloop net backend is active (single-threaded command execution).
 func (server *Server) DisableCron() { server.disableCron = true }
+
+// SetScriptEngine injects the scripting engine (called from backends.go to avoid import cycle).
+func (server *Server) SetScriptEngine(e iface.ScriptEngine) {
+	server.scriptEngine = e
+}
+
+// ExecFromScript is the invoker callback for redis.call/pcall inside Lua scripts.
+// It runs commands through the normal Server.Exec path so writes propagate to AOF/replicas.
+func (server *Server) ExecFromScript(c redis.Connection, cmdLine [][]byte) redis.Reply {
+	return server.Exec(c, cmdLine)
+}
 
 func fileExists(filename string) bool {
 	info, err := os.Stat(filename)
@@ -123,6 +139,13 @@ func NewStandaloneServer() *Server {
 	// record slow log
 	server.slogLogger = NewSlowLogger(config.Properties.SlowLogMaxLen, config.Properties.SlowLogSlowerThan)
 
+	// wire script engine
+	busyMs := config.Properties.BusyReplyThreshold
+	if busyMs <= 0 {
+		busyMs = 5000
+	}
+	server.scriptEngine = iscript.NewEngine(server.ExecFromScript, busyMs)
+
 	return server
 }
 
@@ -160,6 +183,23 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 	}
 	if cmdName == "debug" {
 		return execDebug(server, c, cmdLine[1:])
+	}
+
+	// scripting
+	if cmdName == "eval" {
+		return server.execEval(c, cmdLine[1:])
+	}
+	if cmdName == "eval_ro" {
+		return server.execEval(c, cmdLine[1:])
+	}
+	if cmdName == "evalsha" {
+		return server.execEvalSha(c, cmdLine[1:])
+	}
+	if cmdName == "evalsha_ro" {
+		return server.execEvalSha(c, cmdLine[1:])
+	}
+	if cmdName == "script" {
+		return server.execScript(c, cmdLine[1:])
 	}
 
 	// slowlog

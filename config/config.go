@@ -84,6 +84,9 @@ type ServerProperties struct {
 	MaxmemorySamples int    `cfg:"maxmemory-samples"` // eviction pool sample size (Redis default 5)
 	Hz               int    `cfg:"hz"`                // serverCron frequency; ticks every 1000/hz ms (Redis default 10)
 
+	// scripting
+	BusyReplyThreshold int64 `cfg:"busy-reply-threshold"` // Lua script timeout in ms (default 5000)
+
 	rawConfig map[string]string // populated by parse(); used by normalizeMemoryConfig
 }
 
