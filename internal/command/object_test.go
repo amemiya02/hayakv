@@ -3,7 +3,9 @@ package database
 import (
 	"testing"
 
+	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/iface/database"
+	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
@@ -72,6 +74,41 @@ func TestExecObjectEncoding(t *testing.T) {
 	if string(bulkReply.Arg) != "raw" {
 		t.Fatalf("expected 'raw', got %q", string(bulkReply.Arg))
 	}
+}
+
+func TestObjectIdletimeAndFreq(t *testing.T) {
+	db := makeBasicDB()
+	db.PutEntity("k", &database.DataEntity{Data: []byte("v")})
+
+	config.Properties.MaxmemoryPolicy = "allkeys-lru"
+	r := execObject(db, [][]byte{[]byte("IDLETIME"), []byte("k")})
+	if _, ok := r.(*protocol.IntReply); !ok {
+		t.Fatalf("IDLETIME should be int reply, got %T", r)
+	}
+	// FREQ under a non-LFU policy is an error in Redis
+	if er := execObject(db, [][]byte{[]byte("FREQ"), []byte("k")}); !isErrReply(er) {
+		t.Fatalf("FREQ under LRU policy must error")
+	}
+
+	config.Properties.MaxmemoryPolicy = "allkeys-lfu"
+	db.touchLRU("k")
+	if r := execObject(db, [][]byte{[]byte("FREQ"), []byte("k")}); !isIntReply(r) {
+		t.Fatalf("FREQ under LFU policy should be int reply, got %T", r)
+	}
+	// IDLETIME under LFU policy is an error in Redis
+	if er := execObject(db, [][]byte{[]byte("IDLETIME"), []byte("k")}); !isErrReply(er) {
+		t.Fatalf("IDLETIME under LFU policy must error")
+	}
+}
+
+func isErrReply(r redis.Reply) bool {
+	_, ok := r.(protocol.ErrorReply)
+	return ok
+}
+
+func isIntReply(r redis.Reply) bool {
+	_, ok := r.(*protocol.IntReply)
+	return ok
 }
 
 func TestExecObjectSubCommand(t *testing.T) {

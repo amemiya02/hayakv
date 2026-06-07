@@ -20,6 +20,10 @@ func execObject(db *DB, args [][]byte) redis.Reply {
 	switch subCommand {
 	case "ENCODING":
 		return execObjectEncoding(db, key)
+	case "IDLETIME":
+		return execObjectIdleTime(db, key)
+	case "FREQ":
+		return execObjectFreq(db, key)
 	default:
 		return protocol.MakeErrReply("ERR Unknown subcommand or wrong number of arguments for '" + subCommand + "'")
 	}
@@ -69,6 +73,41 @@ func syncRobjEncoding(robj *object.Robj) {
 			robj.Encoding = zset.CurrentEncoding()
 		}
 	}
+}
+
+// execObjectIdleTime returns seconds since the key was last accessed (LRU).
+// Errors under an LFU policy, matching Redis.
+func execObjectIdleTime(db *DB, key string) redis.Reply {
+	if usingLFU() {
+		return protocol.MakeErrReply("ERR An LFU maxmemory policy is selected, idle time not tracked. Please note that when switching between maxmemory policies at runtime LFU and LRU data will take some time to adjust.")
+	}
+	if _, exists := db.getEntityNoTouch(key); !exists {
+		return protocol.MakeErrReply("ERR no such key")
+	}
+	raw, ok := db.lruMap.Get(key)
+	if !ok {
+		return protocol.MakeIntReply(0)
+	}
+	m := raw.(lruMeta)
+	idleUnits := lruIdleFor(lruClock(), m.lruValue())
+	// units are lruClockRes ms; report seconds
+	return protocol.MakeIntReply(int64(idleUnits) * lruClockRes / 1000)
+}
+
+// execObjectFreq returns the logarithmic access frequency counter (LFU).
+// Errors under a non-LFU policy, matching Redis.
+func execObjectFreq(db *DB, key string) redis.Reply {
+	if !usingLFU() {
+		return protocol.MakeErrReply("ERR An LFU maxmemory policy is not selected, access frequency not tracked. Please note that when switching between maxmemory policies at runtime LFU and LRU data will take some time to adjust.")
+	}
+	if _, exists := db.getEntityNoTouch(key); !exists {
+		return protocol.MakeErrReply("ERR no such key")
+	}
+	raw, ok := db.lruMap.Get(key)
+	if !ok {
+		return protocol.MakeIntReply(int64(lfuInitVal))
+	}
+	return protocol.MakeIntReply(int64(lfuDecay(raw.(lruMeta))))
 }
 
 func init() {

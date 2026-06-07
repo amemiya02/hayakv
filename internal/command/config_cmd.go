@@ -1,0 +1,93 @@
+package database
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/amemiya02/hayakv/config"
+	"github.com/amemiya02/hayakv/internal/iface/redis"
+	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
+)
+
+// execConfig implements a minimal CONFIG GET/SET sufficient for M5 differential
+// scenarios and for go-redis/redis-py to negotiate eviction settings.
+func execConfig(args [][]byte) redis.Reply {
+	if len(args) < 2 {
+		return protocol.MakeArgNumErrReply("config")
+	}
+	sub := strings.ToUpper(string(args[0]))
+	switch sub {
+	case "GET":
+		param := strings.ToLower(string(args[1]))
+		pairs := configGet(param)
+		return protocol.MakeMultiBulkReply(pairs)
+	case "SET":
+		if len(args) < 3 {
+			return protocol.MakeArgNumErrReply("config|set")
+		}
+		param := strings.ToLower(string(args[1]))
+		value := string(args[2])
+		return configSet(param, value)
+	default:
+		return protocol.MakeErrReply("ERR Unknown CONFIG subcommand or wrong number of arguments for '" + sub + "'")
+	}
+}
+
+// configGet returns name/value byte pairs for the (possibly wildcard) param.
+// M5 only models the four eviction/cron parameters.
+func configGet(param string) [][]byte {
+	known := map[string]func() string{
+		"maxmemory":         func() string { return strconv.FormatInt(config.Properties.Maxmemory, 10) },
+		"maxmemory-policy":  func() string { return config.Properties.MaxmemoryPolicy },
+		"maxmemory-samples": func() string { return strconv.Itoa(config.Properties.MaxmemorySamples) },
+		"hz":                func() string { return strconv.Itoa(config.Properties.Hz) },
+	}
+	var out [][]byte
+	for name, getter := range known {
+		if param == name || param == "*" {
+			out = append(out, []byte(name), []byte(getter()))
+		}
+	}
+	return out
+}
+
+func configSet(param, value string) redis.Reply {
+	switch param {
+	case "maxmemory":
+		n, err := config.ParseMemoryBytes(value)
+		if err != nil {
+			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'maxmemory'")
+		}
+		config.Properties.Maxmemory = n
+	case "maxmemory-policy":
+		if !validPolicy(value) {
+			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'maxmemory-policy'")
+		}
+		config.Properties.MaxmemoryPolicy = strings.ToLower(value)
+	case "maxmemory-samples":
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'maxmemory-samples'")
+		}
+		config.Properties.MaxmemorySamples = n
+	case "hz":
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'hz'")
+		}
+		config.Properties.Hz = n
+	default:
+		// Unknown-but-tolerated: Redis accepts many params we don't model.
+		return protocol.MakeOkReply()
+	}
+	return protocol.MakeOkReply()
+}
+
+func validPolicy(v string) bool {
+	switch strings.ToLower(v) {
+	case "noeviction", "allkeys-lru", "allkeys-lfu", "allkeys-random",
+		"volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl":
+		return true
+	}
+	return false
+}

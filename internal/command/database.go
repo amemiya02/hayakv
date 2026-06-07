@@ -200,6 +200,20 @@ func (db *DB) GetEntity(key string) (*database.DataEntity, bool) {
 	return entity, true
 }
 
+// getEntityNoTouch is like GetEntity but does not update access metadata.
+// Used by OBJECT FREQ/IDLETIME (Redis LOOKUP_NOTOUCH).
+func (db *DB) getEntityNoTouch(key string) (*database.DataEntity, bool) {
+	raw, ok := db.data.GetWithLock(key)
+	if !ok {
+		return nil, false
+	}
+	if db.IsExpired(key) {
+		return nil, false
+	}
+	entity, _ := raw.(*database.DataEntity)
+	return entity, true
+}
+
 // PutEntity a DataEntity into DB
 func (db *DB) PutEntity(key string, entity *database.DataEntity) int {
 	ret := db.data.PutWithLock(key, entity)

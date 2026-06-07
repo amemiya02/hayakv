@@ -152,6 +152,9 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 	} else if cmdName == "command" {
 		return execCommand(cmdLine[1:])
 	}
+	if cmdName == "config" {
+		return execConfig(cmdLine[1:])
+	}
 
 	// read only slave
 	role := atomic.LoadInt32(&server.role)
