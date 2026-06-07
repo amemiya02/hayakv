@@ -1,0 +1,57 @@
+name: nightly-tcl
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  tcl:
+    runs-on: ubuntu-latest
+
+    services:
+      redis8:
+        image: redis:8.4.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+
+    env:
+      REDIS_TCL_DIR: /tmp/redis/tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+
+      - name: Install tcl and redis-tools
+        run: sudo apt-get update && sudo apt-get install -y tcl redis-tools
+
+      - name: Checkout pinned redis tests
+        run: |
+          TAG=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' test/tcl/redisversion.go | head -1 | tr -d '"')
+          echo "Checking out redis/redis@$TAG"
+          git clone --depth 1 --branch "$TAG" https://github.com/redis/redis /tmp/redis
+
+      - name: Manifest gate
+        run: go test ./test/tcl -run TestTCLManifestCoversEveryInScopeFile -v
+
+      - name: Run in-scope TCL tests
+        run: bash test/tcl/run_tcl.sh
+        continue-on-error: true
+
+      - name: Append scoreboard row
+        run: |
+          go run ./test/tcl/scoreboard/cmd
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add test/tcl/scoreboard/history.jsonl
+          git diff --cached --quiet || git commit -m "chore(scoreboard): nightly KPI $(date -u +%Y-%m-%d)"
+          git push || echo "push failed (expected on forks or first run)"
