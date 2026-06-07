@@ -14,7 +14,7 @@
 #   tests/unit/oom-score-adj.tcl    -> OS-specific cgroup tweak
 #   tests/support/*                 -> test infrastructure, not test files
 #   tests/cluster/*                 -> Redis Cluster protocol tests (hayakv cluster is Raft-based)
-#   tests/unit/scripting.tcl        -> EVAL/SCRIPT land in M10
+#   tests/unit/scripting.tcl        -> partial (FUNCTION/LDB/setresp(3) out of scope)
 #   tests/unit/introspection.tcl    -> CLIENT family M11; file pass M12
 #   tests/unit/networking.tcl       -> CLIENT/CONN info; M11
 
@@ -51,7 +51,7 @@ files:
   - {file: tests/unit/pause.tcl,           status: excluded, reason: "CLIENT PAUSE not yet implemented"}
   - {file: tests/unit/protocol.tcl,        status: pass}
   - {file: tests/unit/pubsub.tcl,          status: excluded, reason: "pub/sub multi-connection; harness limitation"}
-  - {file: tests/unit/scripting.tcl,       status: excluded, reason: "EVAL/SCRIPT land in M10"}
+  - {file: tests/unit/scripting.tcl,       status: partial, reason: "FUNCTION/LDB/setresp(3) out of M10 scope", skips: ["FUNCTION/*", "LDB/*", "setresp(3)"]}
   - {file: tests/unit/slowlog.tcl,         status: excluded, reason: "SLOWLOG not yet implemented"}
   - {file: tests/unit/sort.tcl,            status: pass}
   - {file: tests/unit/tls.tcl,             status: excluded, reason: "TLS not in scope"}
