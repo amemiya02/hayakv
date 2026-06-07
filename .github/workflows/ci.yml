@@ -39,11 +39,24 @@ jobs:
         run: go mod download
 
       - name: Verify formatting
-        run: |
-          test -z "$(gofmt -l $(find . -name '*.go' -type f))"
+        run: test -z "$(gofmt -l $(find . -name '*.go' -type f))"
 
       - name: Vet
         run: go vet ./...
 
-      - name: Run M0 checks
-        run: scripts/run-m0-checks.sh
+      - name: Race tests
+        run: go test -race -count=1 ./config ./internal/datastruct/... ./internal/proto/... ./internal/net/goroutine ./internal/net/eventloop ./internal/server ./internal/iface ./internal/command ./cmd/hayakv -timeout 5m
+
+      - name: Integration tests
+        run: go test -count=1 ./test/integration
+
+      - name: Replication tests
+        run: go test -count=1 -p 1 ./test/integration -run 'TestReplica|TestReplconf|TestWait|TestDiskless|TestPartial|TestFullResync|TestLive|TestPromote|TestInfoReplication'
+
+      - name: Differential tests
+        run: |
+          go test -count=1 ./test/diff -run TestM0DifferentialRESP2
+          go test -count=1 ./test/diff -run TestM2DifferentialRedisDB
+
+      - name: Build
+        run: go build ./cmd/hayakv

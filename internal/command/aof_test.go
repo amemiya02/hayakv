@@ -210,6 +210,9 @@ func TestRewriteAOF(t *testing.T) {
 // TestRewriteAOF2 tests execute commands during rewrite procedure
 func TestRewriteAOF2(t *testing.T) {
 	/* prepare */
+	savedProps := config.Properties
+	defer func() { config.Properties = savedProps }()
+
 	tmpFile, err := os.CreateTemp(config.GetTmpDir(), "*.aof")
 	if err != nil {
 		t.Error(err)

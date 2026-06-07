@@ -46,6 +46,9 @@ type Server struct {
 	// serverCronDone signals the serverCron goroutine to stop on Close().
 	serverCronDone chan struct{}
 
+	// replCronDone signals the replCron goroutine to stop on Close().
+	replCronDone chan struct{}
+
 	// disableCron prevents StartCron from launching (eventloop backend).
 	disableCron bool
 
@@ -261,6 +264,10 @@ func (server *Server) AfterClientClose(c redis.Connection) {
 
 // Close graceful shutdown database
 func (server *Server) Close() {
+	// stop repl cron
+	if server.replCronDone != nil {
+		close(server.replCronDone)
+	}
 	// stop server cron
 	if server.serverCronDone != nil {
 		close(server.serverCronDone)
@@ -478,13 +485,20 @@ func (server *Server) GetDBSize(dbIndex int) (int, int) {
 }
 
 func (server *Server) startReplCron() {
-	go func(mdb *Server) {
-		ticker := time.Tick(time.Second * 10)
-		for range ticker {
-			mdb.slaveCron()
-			mdb.masterCron()
+	server.replCronDone = make(chan struct{})
+	go func(mdb *Server, done <-chan struct{}) {
+		ticker := time.NewTicker(time.Second * 10)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				mdb.slaveCron()
+				mdb.masterCron()
+			case <-done:
+				return
+			}
 		}
-	}(server)
+	}(server, server.replCronDone)
 }
 
 // StartCron runs the hz-driven background cron: active expiration across
