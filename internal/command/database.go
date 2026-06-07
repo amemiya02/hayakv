@@ -37,6 +37,9 @@ type DB struct {
 	// callbacks
 	insertCallback database.KeyEventCallback
 	deleteCallback database.KeyEventCallback
+
+	// owning server (for cross-db memory accounting / eviction)
+	server *Server
 }
 
 // ExecFunc is interface for command executor
@@ -118,6 +121,13 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 	}
 	if !validateArity(cmd.arity, cmdLine) {
 		return protocol.MakeArgNumErrReply(cmdName)
+	}
+
+	// M5: enforce maxmemory for denyoom (allocating) commands.
+	if isDenyOOM(cmd) && evictionEnabledOrLimited() {
+		if db.server != nil && !db.server.freeMemoryIfNeeded() {
+			return oomErrReply()
+		}
 	}
 
 	prepare := cmd.prepare

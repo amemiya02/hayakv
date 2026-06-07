@@ -64,6 +64,7 @@ func NewStandaloneServer() *Server {
 	for i := range server.dbSet {
 		singleDB := makeDB()
 		singleDB.index = i
+		singleDB.server = server
 		holder := &atomic.Value{}
 		holder.Store(singleDB)
 		server.dbSet[i] = holder
@@ -281,6 +282,7 @@ func (server *Server) loadDB(dbIndex int, newDB *DB) redis.Reply {
 	}
 	oldDB := server.mustSelectDB(dbIndex)
 	newDB.index = dbIndex
+	newDB.server = server
 	newDB.addAof = oldDB.addAof // inherit oldDB
 	server.dbSet[dbIndex].Store(newDB)
 	return &protocol.OkReply{}

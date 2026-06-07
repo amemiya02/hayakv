@@ -9,6 +9,7 @@ func makeTestDB() *DB {
 		data:       dict.MakeConcurrent(dataDictSize),
 		versionMap: dict.MakeConcurrent(dataDictSize),
 		ttlMap:     dict.MakeConcurrent(ttlDictSize),
+		lruMap:     dict.MakeConcurrent(dataDictSize),
 		addAof:     func(line CmdLine) {},
 	}
 }

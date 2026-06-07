@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/amemiya02/hayakv/config"
+	"github.com/amemiya02/hayakv/internal/iface/redis"
+	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
 
 // Redis approximate-LRU/LFU constants.
@@ -16,6 +18,33 @@ const (
 	lfuLogFactor = 10                 // Redis lfu-log-factor default
 	lfuInitVal   = 5                  // Redis LFU_INIT_VAL: new keys start at 5
 )
+
+// isDenyOOM reports whether a command carries the Redis "denyoom" flag (write
+// commands that allocate). Reads the attached extra.signs.
+func isDenyOOM(cmd *command) bool {
+	if cmd == nil || cmd.extra == nil {
+		return false
+	}
+	for _, s := range cmd.extra.signs {
+		if s == redisFlagDenyOOM {
+			return true
+		}
+	}
+	return false
+}
+
+// oomErrReply is the exact Redis OOM error returned when eviction can't free
+// enough memory for a denyoom command.
+func oomErrReply() redis.Reply {
+	return protocol.MakeErrReply("OOM command not allowed when used memory > 'maxmemory'.")
+}
+
+// evictionEnabledOrLimited reports whether a maxmemory limit is configured at
+// all (any positive value). Under noeviction this still gates denyoom commands
+// so they can be rejected with -OOM.
+func evictionEnabledOrLimited() bool {
+	return config.Properties.Maxmemory > 0
+}
 
 // lruClock returns the current coarse clock in lruClockRes-ms units, masked to
 // 24 bits. Mirrors Redis getLRUClock(): (mstime/RESOLUTION) & LRU_CLOCK_MAX.
