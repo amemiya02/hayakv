@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/logger"
 	"github.com/amemiya02/hayakv/internal/lib/sync/atomic"
@@ -61,16 +62,32 @@ type slaveClient struct {
 	capacity     uint8
 }
 
-// aofListener is currently only responsible for updating the backlog
+// replBacklog is a bounded ring of recent replication stream bytes used for
+// partial resync. When limit > 0, the buffer keeps at most `limit` bytes and
+// advances beginOffset as the oldest bytes are dropped. limit == 0 is unbounded.
 type replBacklog struct {
 	buf           []byte
 	beginOffset   int64
 	currentOffset int64
+	limit         int64
+}
+
+func (backlog *replBacklog) setLimit(limit int64) {
+	backlog.limit = limit
 }
 
 func (backlog *replBacklog) appendBytes(bin []byte) {
 	backlog.buf = append(backlog.buf, bin...)
 	backlog.currentOffset += int64(len(bin))
+	if backlog.limit > 0 && int64(len(backlog.buf)) > backlog.limit {
+		drop := int64(len(backlog.buf)) - backlog.limit
+		// advance beginOffset and drop the oldest `drop` bytes; copy to a fresh
+		// slice so the dropped prefix can be garbage-collected.
+		trimmed := make([]byte, backlog.limit)
+		copy(trimmed, backlog.buf[drop:])
+		backlog.buf = trimmed
+		backlog.beginOffset += drop
+	}
 }
 
 func (backlog *replBacklog) getSnapshot() ([]byte, int64) {
@@ -166,6 +183,7 @@ func (server *Server) rewriteRDB() error {
 	}
 	rdbFilename := rdbFile.Name()
 	newBacklog := &replBacklog{}
+	newBacklog.setLimit(config.Properties.ReplBacklogSize)
 	aofListener := &replAofListener{
 		backlog: newBacklog,
 		mdb:     server,
@@ -384,7 +402,10 @@ func (server *Server) setSlaveOnline(slave *slaveClient, currentOffset int64) {
 
 var pingBytes = protocol.MakeMultiBulkReply(utils.ToCmdLine("ping")).ToBytes()
 
-const maxBacklogSize = 10 * 1024 * 1024 // 10MB
+// backlogRewriteFactor: trigger an RDB rewrite once the live keyspace AOF has
+// grown well past the backlog window, to keep partial-resync useful. The
+// backlog buffer itself is bounded by repl-backlog-size via appendBytes.
+const backlogRewriteFactor = 4
 
 func (server *Server) masterCron() {
 	server.masterStatus.mu.Lock()
@@ -395,17 +416,20 @@ func (server *Server) masterCron() {
 	if server.masterStatus.bgSaveState == bgSaveFinish {
 		server.masterStatus.backlog.appendBytes(pingBytes)
 	}
-	backlogSize := len(server.masterStatus.backlog.buf)
+	backlogLimit := server.masterStatus.backlog.limit
+	producedSinceBegin := server.masterStatus.backlog.currentOffset - server.masterStatus.backlog.beginOffset
 	server.masterStatus.mu.Unlock()
 	if err := server.masterSendUpdatesToSlave(); err != nil {
 		logger.Errorf("masterSendUpdatesToSlave error: %v", err)
 	}
-	if backlogSize > maxBacklogSize && !server.masterStatus.rewriting.Get() {
+	// trigger rewrite only when there is a real limit and we have streamed several
+	// windows' worth of data since the last begin (so the on-disk RDB is stale).
+	if backlogLimit > 0 && producedSinceBegin > backlogLimit*backlogRewriteFactor &&
+		!server.masterStatus.rewriting.Get() {
 		go func() {
 			server.masterStatus.rewriting.Set(true)
 			defer server.masterStatus.rewriting.Set(false)
 			if err := server.rewriteRDB(); err != nil {
-				server.masterStatus.rewriting.Set(false)
 				logger.Errorf("rewrite error: %v", err)
 			}
 		}()
@@ -436,10 +460,12 @@ func (listener *replAofListener) Callback(cmdLines []CmdLine) {
 }
 
 func (server *Server) initMasterStatus() {
+	backlog := &replBacklog{}
+	backlog.setLimit(config.Properties.ReplBacklogSize)
 	server.masterStatus = &masterStatus{
 		mu:           sync.RWMutex{},
 		replId:       utils.RandHexString(40),
-		backlog:      &replBacklog{},
+		backlog:      backlog,
 		slaveMap:     make(map[redis.Connection]*slaveClient),
 		waitSlaves:   make(map[*slaveClient]struct{}),
 		onlineSlaves: make(map[*slaveClient]struct{}),
@@ -467,7 +493,9 @@ func (server *Server) stopMaster() {
 	_ = os.Remove(server.masterStatus.rdbFilename)
 	server.masterStatus.rdbFilename = ""
 	server.masterStatus.replId = ""
-	server.masterStatus.backlog = &replBacklog{}
+	resetBacklog := &replBacklog{}
+	resetBacklog.setLimit(config.Properties.ReplBacklogSize)
+	server.masterStatus.backlog = resetBacklog
 	server.masterStatus.slaveMap = make(map[redis.Connection]*slaveClient)
 	server.masterStatus.waitSlaves = make(map[*slaveClient]struct{})
 	server.masterStatus.onlineSlaves = make(map[*slaveClient]struct{})

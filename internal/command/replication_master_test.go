@@ -313,3 +313,53 @@ func TestReplicationMasterRewriteRDB(t *testing.T) {
 	resp = slave.Exec(slaveConn, utils.ToCmdLine("get", "c"))
 	asserts.AssertBulkReply(t, resp, "c")
 }
+
+func TestBacklogTrimAdvancesBeginOffset(t *testing.T) {
+	b := &replBacklog{}
+	b.setLimit(8) // keep at most 8 bytes
+	b.appendBytes([]byte("abcd"))     // begin=0 cur=4 buf="abcd"
+	b.appendBytes([]byte("efgh"))     // begin=0 cur=8 buf="abcdefgh"
+	if b.beginOffset != 0 || b.currentOffset != 8 || string(b.buf) != "abcdefgh" {
+		t.Fatalf("pre-trim: begin=%d cur=%d buf=%q", b.beginOffset, b.currentOffset, b.buf)
+	}
+	b.appendBytes([]byte("ij")) // would be 10 bytes; trim to last 8 → drop "ab"
+	if b.beginOffset != 2 {
+		t.Fatalf("beginOffset = %d, want 2", b.beginOffset)
+	}
+	if b.currentOffset != 10 {
+		t.Fatalf("currentOffset = %d, want 10", b.currentOffset)
+	}
+	if string(b.buf) != "cdefghij" {
+		t.Fatalf("buf = %q, want %q", b.buf, "cdefghij")
+	}
+}
+
+func TestBacklogValidOffsetAfterTrim(t *testing.T) {
+	b := &replBacklog{}
+	b.setLimit(4)
+	b.appendBytes([]byte("abcdef")) // trims to "cdef", begin=2 cur=6
+	if b.isValidOffset(1) { // 1 < beginOffset(2): dropped, must be invalid
+		t.Fatalf("offset 1 should be invalid after trim")
+	}
+	if !b.isValidOffset(2) { // == beginOffset: still in window
+		t.Fatalf("offset 2 should be valid")
+	}
+	if !b.isValidOffset(5) { // within [2,6)
+		t.Fatalf("offset 5 should be valid")
+	}
+	if b.isValidOffset(6) { // == currentOffset: not yet produced
+		t.Fatalf("offset 6 should be invalid")
+	}
+	snap, cur := b.getSnapshotAfter(4) // bytes from offset 4 → "ef"
+	if string(snap) != "ef" || cur != 6 {
+		t.Fatalf("getSnapshotAfter(4) = %q,%d want \"ef\",6", snap, cur)
+	}
+}
+
+func TestBacklogZeroLimitDoesNotTrim(t *testing.T) {
+	b := &replBacklog{} // limit 0 = unbounded (back-compat)
+	b.appendBytes([]byte("abcdefghij"))
+	if b.beginOffset != 0 || string(b.buf) != "abcdefghij" {
+		t.Fatalf("zero limit must not trim: begin=%d buf=%q", b.beginOffset, b.buf)
+	}
+}
