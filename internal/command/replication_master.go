@@ -377,6 +377,23 @@ func (server *Server) execReplConf(c redis.Connection, args [][]byte) redis.Repl
 			slave.offset = offset
 			slave.lastAckTime = time.Now()
 			return &protocol.NoReply{}
+		case "listening-port":
+			port, err := strconv.Atoi(value)
+			if err != nil {
+				return protocol.MakeErrReply("ERR value is not an integer or out of range")
+			}
+			if slave == nil {
+				slave = &slaveClient{conn: c}
+				c.SetSlave()
+				server.masterStatus.mu.Lock()
+				server.masterStatus.slaveMap[c] = slave
+				server.masterStatus.mu.Unlock()
+			}
+			slave.announcePort = port
+		case "ip-address":
+			if slave != nil {
+				slave.announceIp = value
+			}
 		}
 	}
 	return protocol.MakeOkReply()
