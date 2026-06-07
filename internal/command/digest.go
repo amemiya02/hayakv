@@ -123,12 +123,11 @@ func digestKey(key string, entity *database.DataEntity, expiration *time.Time) [
 
 	case *object.List:
 		// List: ordered, so index is mixed in.
+		// Hash index+0x00+value as a single blob to bind the association.
 		v.ForEach(func(i int, val interface{}) bool {
-			idxHash := sha1Bytes([]byte(strconv.Itoa(i)))
 			valBytes := valueToBytes(val)
-			valHash := sha1Bytes(valBytes)
-			mixDigest(&d, idxHash)
-			mixDigest(&d, valHash)
+			blob := append(append([]byte(strconv.Itoa(i)), 0), valBytes...)
+			mixDigest(&d, sha1Bytes(blob))
 			return true
 		})
 

@@ -201,7 +201,7 @@ func TestDigestSetEncodingIndependence(t *testing.T) {
 }
 
 // TestDigestListOrderSensitive verifies that lists with different element
-// orders produce different digests.
+// orders produce different value-only digests.
 func TestDigestListOrderSensitive(t *testing.T) {
 	db := makeTestDB()
 
@@ -211,11 +211,11 @@ func TestDigestListOrderSensitive(t *testing.T) {
 	entity1, _ := db.GetEntity("list1")
 	entity2, _ := db.GetEntity("list2")
 
-	d1 := digestKey("list1", entity1, nil)
-	d2 := digestKey("list2", entity2, nil)
+	d1 := listDigest(entity1)
+	d2 := listDigest(entity2)
 
 	if d1 == d2 {
-		t.Error("different list orderings produced the same digest")
+		t.Error("different list orderings produced the same value digest")
 	}
 }
 
@@ -276,7 +276,8 @@ func TestDigestZSetEncodingIndependence(t *testing.T) {
 }
 
 // TestDigestHashPairBinding verifies that hashes with swapped field-value
-// pairings produce different digests (regression for XOR-commutativity bug).
+// pairings produce different value-only digests. Uses hashValueDigest to
+// exclude the key name, so the test isolates the pairing logic.
 func TestDigestHashPairBinding(t *testing.T) {
 	db := makeTestDB()
 
@@ -288,35 +289,37 @@ func TestDigestHashPairBinding(t *testing.T) {
 	e1, _ := db.GetEntity("h1")
 	e2, _ := db.GetEntity("h2")
 
-	d1 := digestKey("h1", e1, nil)
-	d2 := digestKey("h2", e2, nil)
+	d1 := hashValueDigest(e1)
+	d2 := hashValueDigest(e2)
 
 	if d1 == d2 {
-		t.Error("swapped hash pairings produced the same digest — pairing is not bound")
+		t.Error("swapped hash pairings produced the same value digest — pairing is not bound")
 	}
 }
 
-// TestDigestListOrderSensitive verifies that lists with different element
-// orders produce different digests (regression for XOR-commutativity on index).
+// TestDigestListPairBinding verifies that lists with different element
+// orders produce different value-only digests. Uses listDigest to exclude
+// the key name, so the test isolates the index↔value binding.
 func TestDigestListPairBinding(t *testing.T) {
 	db := makeTestDB()
 
-	db.Exec(nil, utils.ToCmdLine("RPUSH", "l1", "x", "y"))
-	db.Exec(nil, utils.ToCmdLine("RPUSH", "l2", "y", "x"))
+	db.Exec(nil, utils.ToCmdLine("RPUSH", "samekey", "x", "y"))
+	db.Exec(nil, utils.ToCmdLine("RPUSH", "samekey2", "y", "x"))
 
-	e1, _ := db.GetEntity("l1")
-	e2, _ := db.GetEntity("l2")
+	e1, _ := db.GetEntity("samekey")
+	e2, _ := db.GetEntity("samekey2")
 
-	d1 := digestKey("l1", e1, nil)
-	d2 := digestKey("l2", e2, nil)
+	d1 := listDigest(e1)
+	d2 := listDigest(e2)
 
 	if d1 == d2 {
-		t.Error("swapped list elements produced the same digest")
+		t.Error("swapped list elements produced the same value digest — order is not bound")
 	}
 }
 
 // TestDigestZSetPairBinding verifies that zsets with swapped member-score
-// pairings produce different digests.
+// pairings produce different value-only digests. Uses zsetDigest to exclude
+// the key name, so the test isolates the pairing logic.
 func TestDigestZSetPairBinding(t *testing.T) {
 	db := makeTestDB()
 
@@ -328,11 +331,11 @@ func TestDigestZSetPairBinding(t *testing.T) {
 	e1, _ := db.GetEntity("z1")
 	e2, _ := db.GetEntity("z2")
 
-	d1 := digestKey("z1", e1, nil)
-	d2 := digestKey("z2", e2, nil)
+	d1 := zsetDigest(e1)
+	d2 := zsetDigest(e2)
 
 	if d1 == d2 {
-		t.Error("swapped zset score pairings produced the same digest")
+		t.Error("swapped zset score pairings produced the same value digest")
 	}
 }
 
@@ -404,6 +407,18 @@ func getZSetFromEntity(entity *database.DataEntity) *object.ZSet {
 	}
 }
 
+// getListFromEntity unwraps Robj if present and returns the List.
+func getListFromEntity(entity *database.DataEntity) *object.List {
+	switch v := entity.Data.(type) {
+	case *object.Robj:
+		return v.Ptr.(*object.List)
+	case *object.List:
+		return v
+	default:
+		panic("unexpected type for list")
+	}
+}
+
 func collectSetMembers(entity *database.DataEntity) map[string]bool {
 	members := make(map[string]bool)
 	getSetFromEntity(entity).ForEach(func(member string) bool {
@@ -420,6 +435,18 @@ func collectZSetEntries(entity *database.DataEntity) map[string]float64 {
 		return true
 	})
 	return entries
+}
+
+// listDigest computes a value-only digest of a list's elements (order-sensitive).
+func listDigest(entity *database.DataEntity) [20]byte {
+	var d [20]byte
+	getListFromEntity(entity).ForEach(func(i int, val interface{}) bool {
+		valBytes := valueToBytes(val)
+		blob := append(append([]byte(strconv.Itoa(i)), 0), valBytes...)
+		mixDigest(&d, sha1Bytes(blob))
+		return true
+	})
+	return d
 }
 
 // setDigest computes a digest of the set's members (sorted, order-independent).
