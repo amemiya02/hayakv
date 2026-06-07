@@ -74,11 +74,11 @@ func digestKey(key string, entity *database.DataEntity, expiration *time.Time) [
 			return pairs[i].field < pairs[j].field
 		})
 		for _, p := range pairs {
-			fieldHash := sha1Bytes([]byte(p.field))
-			valBytes := valueToBytes(p.value)
-			valHash := sha1Bytes(valBytes)
-			mixDigest(&d, fieldHash)
-			mixDigest(&d, valHash)
+			// Hash field+0x00+value as a single blob to bind the association.
+			// XORing field and value separately would lose pairing (e.g.
+			// {a:1,b:2} and {a:2,b:1} would collide).
+			blob := append(append([]byte(p.field), 0), valueToBytes(p.value)...)
+			mixDigest(&d, sha1Bytes(blob))
 		}
 
 	case *object.Set:
@@ -115,10 +115,10 @@ func digestKey(key string, entity *database.DataEntity, expiration *time.Time) [
 			return pairs[i].member < pairs[j].member
 		})
 		for _, p := range pairs {
-			memberHash := sha1Bytes([]byte(p.member))
-			scoreHash := sha1Bytes([]byte(strconv.FormatFloat(p.score, 'f', -1, 64)))
-			mixDigest(&d, memberHash)
-			mixDigest(&d, scoreHash)
+			// Hash member+0x00+score as a single blob to bind the association.
+			scoreStr := strconv.FormatFloat(p.score, 'f', -1, 64)
+			blob := append(append([]byte(p.member), 0), []byte(scoreStr)...)
+			mixDigest(&d, sha1Bytes(blob))
 		}
 
 	case *object.List:

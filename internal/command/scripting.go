@@ -29,20 +29,20 @@ func parseEvalArgs(args [][]byte) (script string, keys, argv []string, errReply 
 	return script, keys, argv, nil
 }
 
-func (server *Server) execEval(c redis.Connection, args [][]byte) redis.Reply {
+func (server *Server) execEval(c redis.Connection, args [][]byte, readonly bool) redis.Reply {
 	body, keys, argv, errReply := parseEvalArgs(args)
 	if errReply != nil {
 		return errReply
 	}
-	return server.scriptEngine.Eval(c, body, keys, argv)
+	return server.scriptEngine.Eval(c, body, keys, argv, readonly)
 }
 
-func (server *Server) execEvalSha(c redis.Connection, args [][]byte) redis.Reply {
+func (server *Server) execEvalSha(c redis.Connection, args [][]byte, readonly bool) redis.Reply {
 	_, keys, argv, errReply := parseEvalArgs(args)
 	if errReply != nil {
 		return errReply
 	}
-	return server.scriptEngine.EvalSha(c, strings.ToLower(string(args[0])), keys, argv)
+	return server.scriptEngine.EvalSha(c, strings.ToLower(string(args[0])), keys, argv, readonly)
 }
 
 func (server *Server) execScript(c redis.Connection, args [][]byte) redis.Reply {

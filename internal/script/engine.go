@@ -70,28 +70,30 @@ func (e *Engine) Kill() error {
 }
 
 // Eval loads (if not already cached) and runs a script.
-func (e *Engine) Eval(c iredis.Connection, body string, keys, args []string) iredis.Reply {
+// When readonly is true, redis.call/pcall rejects write commands.
+func (e *Engine) Eval(c iredis.Connection, body string, keys, args []string, readonly bool) iredis.Reply {
 	e.Load(body)
-	return e.run(c, body, keys, args)
+	return e.run(c, body, keys, args, readonly)
 }
 
 // EvalSha runs a previously loaded script by SHA1.
-func (e *Engine) EvalSha(c iredis.Connection, sha string, keys, args []string) iredis.Reply {
+// When readonly is true, redis.call/pcall rejects write commands.
+func (e *Engine) EvalSha(c iredis.Connection, sha string, keys, args []string, readonly bool) iredis.Reply {
 	e.mu.Lock()
 	body, ok := e.cache[sha]
 	e.mu.Unlock()
 	if !ok {
 		return protocol.MakeErrReply("NOSCRIPT No matching script. Please use EVAL.")
 	}
-	return e.run(c, body, keys, args)
+	return e.run(c, body, keys, args, readonly)
 }
 
 // run creates a fresh Lua state, registers the redis library, and executes.
-func (e *Engine) run(c iredis.Connection, body string, keys, args []string) iredis.Reply {
+func (e *Engine) run(c iredis.Connection, body string, keys, args []string, readonly bool) iredis.Reply {
 	L := lua.NewState(lua.Options{SkipOpenLibs: false})
 	defer L.Close()
 
-	e.registerRedis(L, c)
+	e.registerRedis(L, c, readonly)
 	setKeysArgv(L, keys, args)
 
 	if err := L.DoString(body); err != nil {

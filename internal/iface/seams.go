@@ -81,8 +81,8 @@ type ScriptInvoker func(client iredis.Connection, cmdLine CmdLine) iredis.Reply
 // ScriptEngine is the seam for server-side scripting (default: gopher-lua; a
 // cgo/liblua impl can replace it without touching the command layer).
 type ScriptEngine interface {
-	Eval(client iredis.Connection, body string, keys, args []string) iredis.Reply
-	EvalSha(client iredis.Connection, sha string, keys, args []string) iredis.Reply
+	Eval(client iredis.Connection, body string, keys, args []string, readonly bool) iredis.Reply
+	EvalSha(client iredis.Connection, sha string, keys, args []string, readonly bool) iredis.Reply
 	Load(body string) (sha string)
 	Exists(shas []string) []bool
 	Flush()

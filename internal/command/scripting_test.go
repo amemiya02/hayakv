@@ -161,3 +161,54 @@ func TestScriptKill(t *testing.T) {
 		t.Fatalf("SCRIPT KILL = %q", r.ToBytes())
 	}
 }
+
+func TestEvalRoRejectsWrite(t *testing.T) {
+	s := NewStandaloneServer()
+	conn := connection.NewFakeConn()
+
+	// EVAL_RO calling SET must fail
+	r := s.Exec(conn, utils.ToCmdLine("EVAL_RO", "redis.call('set',KEYS[1],ARGV[1]) return 'ok'", "1", "k", "v"))
+	b := string(r.ToBytes())
+	if len(b) == 0 || b[0] != '-' {
+		t.Fatalf("EVAL_RO with SET should return error, got %q", b)
+	}
+	if !strings.Contains(b, "read-only") {
+		t.Fatalf("expected 'read-only' in error, got %q", b)
+	}
+
+	// EVAL_RO calling GET is fine
+	r2 := s.Exec(conn, utils.ToCmdLine("EVAL_RO", "return redis.call('get','nosuchkey')", "0"))
+	b2 := string(r2.ToBytes())
+	if b2 != "$-1\r\n" {
+		t.Fatalf("EVAL_RO with GET should return nil, got %q", b2)
+	}
+
+	// Normal EVAL with SET succeeds (not read-only)
+	r3 := s.Exec(conn, utils.ToCmdLine("EVAL", "redis.call('set',KEYS[1],ARGV[1]) return redis.call('get',KEYS[1])", "1", "rwkey", "rwval"))
+	asserts.AssertBulkReply(t, r3, "rwval")
+}
+
+func TestEvalShaRoRejectsWrite(t *testing.T) {
+	s := NewStandaloneServer()
+	conn := connection.NewFakeConn()
+
+	// Load a write script
+	r := s.Exec(conn, utils.ToCmdLine("SCRIPT", "LOAD", "redis.call('set','k','v') return 'ok'"))
+	sha := strings.TrimSpace(string(r.ToBytes()))
+	if idx := strings.Index(sha, "\r\n"); idx >= 0 {
+		sha = sha[idx+2:]
+	}
+	if idx := strings.Index(sha, "\r\n"); idx >= 0 {
+		sha = sha[:idx]
+	}
+
+	// EVALSHA_RO with the write script must fail
+	r2 := s.Exec(conn, utils.ToCmdLine("EVALSHA_RO", sha, "0"))
+	b := string(r2.ToBytes())
+	if len(b) == 0 || b[0] != '-' {
+		t.Fatalf("EVALSHA_RO with write script should return error, got %q", b)
+	}
+	if !strings.Contains(b, "read-only") {
+		t.Fatalf("expected 'read-only' in error, got %q", b)
+	}
+}

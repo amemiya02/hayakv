@@ -187,16 +187,16 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 
 	// scripting
 	if cmdName == "eval" {
-		return server.execEval(c, cmdLine[1:])
+		return server.execEval(c, cmdLine[1:], false)
 	}
 	if cmdName == "eval_ro" {
-		return server.execEval(c, cmdLine[1:])
+		return server.execEval(c, cmdLine[1:], true)
 	}
 	if cmdName == "evalsha" {
-		return server.execEvalSha(c, cmdLine[1:])
+		return server.execEvalSha(c, cmdLine[1:], false)
 	}
 	if cmdName == "evalsha_ro" {
-		return server.execEvalSha(c, cmdLine[1:])
+		return server.execEvalSha(c, cmdLine[1:], true)
 	}
 	if cmdName == "script" {
 		return server.execScript(c, cmdLine[1:])

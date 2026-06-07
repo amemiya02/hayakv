@@ -26,12 +26,12 @@ func setKeysArgv(L *lua.LState, keys, args []string) {
 }
 
 // registerRedis registers the "redis" (and "server" alias) module.
-func (e *Engine) registerRedis(L *lua.LState, c iredis.Connection) {
+func (e *Engine) registerRedis(L *lua.LState, c iredis.Connection, readonly bool) {
 	mod := L.NewTable()
 
 	// Command execution
-	mod.RawSetString("call", L.NewFunction(e.luaCall(c, false)))
-	mod.RawSetString("pcall", L.NewFunction(e.luaCall(c, true)))
+	mod.RawSetString("call", L.NewFunction(e.luaCall(c, false, readonly)))
+	mod.RawSetString("pcall", L.NewFunction(e.luaCall(c, true, readonly)))
 
 	// Reply helpers
 	mod.RawSetString("error_reply", L.NewFunction(luaErrorReply))
@@ -58,7 +58,7 @@ func (e *Engine) registerRedis(L *lua.LState, c iredis.Connection) {
 }
 
 // luaCall returns a LGFunction for redis.call or redis.pcall.
-func (e *Engine) luaCall(c iredis.Connection, protected bool) lua.LGFunction {
+func (e *Engine) luaCall(c iredis.Connection, protected, readonly bool) lua.LGFunction {
 	return func(L *lua.LState) int {
 		n := L.GetTop()
 		if n == 0 {
@@ -73,6 +73,16 @@ func (e *Engine) luaCall(c iredis.Connection, protected bool) lua.LGFunction {
 		cmdLine := make([][]byte, 0, n)
 		for i := 1; i <= n; i++ {
 			cmdLine = append(cmdLine, []byte(L.CheckString(i)))
+		}
+		if readonly && !isReadOnlyLuaCmd(cmdLine) {
+			errMsg := "ERR Write commands are not allowed from read-only scripts."
+			if protected {
+				L.Push(lua.LFalse)
+				L.Push(lua.LString(errMsg))
+				return 2
+			}
+			L.RaiseError("%s", errMsg)
+			return 0
 		}
 		reply := e.invoker(c, cmdLine)
 		if isErrReply(reply) {
@@ -101,6 +111,59 @@ func errText(r iredis.Reply) string {
 		return strings.TrimSuffix(string(b[1:]), "\r\n")
 	}
 	return ""
+}
+
+// isReadOnlyLuaCmd reports whether a command issued from a Lua script is
+// read-only (i.e. allowed inside EVAL_RO / EVALSHA_RO).
+// Uses a write-command set: if the command IS in this set, it's NOT read-only.
+func isReadOnlyLuaCmd(cmdLine [][]byte) bool {
+	if len(cmdLine) == 0 {
+		return false
+	}
+	name := strings.ToLower(string(cmdLine[0]))
+	writeCmds := map[string]bool{
+		// strings
+		"set": true, "setex": true, "psetex": true, "setnx": true, "mset": true,
+		"msetnx": true, "append": true, "incr": true, "incrby": true, "incrbyfloat": true,
+		"decr": true, "decrby": true, "getdel": true, "getset": true, "setrange": true,
+		"del": true, "unlink": true, "expire": true, "expireat": true, "pexpire": true,
+		"pexpireat": true, "persist": true, "rename": true, "renamenx": true,
+		// hashes
+		"hset": true, "hmset": true, "hsetnx": true, "hincrby": true, "hincrbyfloat": true,
+		"hdel": true,
+		// lists
+		"lpush": true, "lpushx": true, "rpush": true, "rpushx": true, "lpop": true,
+		"rpop": true, "lset": true, "linsert": true, "lrem": true, "ltrim": true,
+		"rpoplpush": true, "lmove": true, "blmove": true, "blpop": true, "brpop": true,
+		"brpoplpush": true, "lmpop": true, "blmpop": true,
+		// sets
+		"sadd": true, "srem": true, "smove": true, "spop": true,
+		"sinterstore": true, "sunionstore": true, "sdiffstore": true,
+		// sorted sets
+		"zadd": true, "zrem": true, "zincrby": true, "zremrangebyrank": true,
+		"zremrangebyscore": true, "zremrangebylex": true, "zunionstore": true,
+		"zinterstore": true, "zdiffstore": true, "zrangestore": true,
+		"zmpop": true, "bzmpop": true, "bzpopmin": true, "bzpopmax": true,
+		// hyperloglog
+		"pfadd": true,
+		// geo
+		"geoadd": true,
+		// streams
+		"xadd": true, "xdel": true, "xtrim": true, "xgroup": true, "xsetid": true,
+		"xack": true,
+		// scripting
+		"eval": true, "evalsha": true, "script": true,
+		// pub/sub
+		"subscribe": true, "unsubscribe": true, "psubscribe": true, "punsubscribe": true,
+		"publish": true,
+		// server
+		"flushdb": true, "flushall": true, "swapdb": true, "debug": true,
+		"bgrewriteaof": true, "bgsave": true, "save": true, "shutdown": true,
+		"slaveof": true, "replicaof": true, "migrate": true, "restore": true,
+		"sort": true, // SORT with STORE is a write
+	}
+	// If it's a known write command, it's NOT read-only.
+	return !writeCmds[name]
 }
 
 // luaErrorReply implements redis.error_reply(msg).

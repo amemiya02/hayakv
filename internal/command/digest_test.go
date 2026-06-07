@@ -275,6 +275,67 @@ func TestDigestZSetEncodingIndependence(t *testing.T) {
 	}
 }
 
+// TestDigestHashPairBinding verifies that hashes with swapped field-value
+// pairings produce different digests (regression for XOR-commutativity bug).
+func TestDigestHashPairBinding(t *testing.T) {
+	db := makeTestDB()
+
+	// Hash {a:1, b:2}
+	db.Exec(nil, utils.ToCmdLine("HSET", "h1", "a", "1", "b", "2"))
+	// Hash {a:2, b:1} — same fields, same values, different pairing
+	db.Exec(nil, utils.ToCmdLine("HSET", "h2", "a", "2", "b", "1"))
+
+	e1, _ := db.GetEntity("h1")
+	e2, _ := db.GetEntity("h2")
+
+	d1 := digestKey("h1", e1, nil)
+	d2 := digestKey("h2", e2, nil)
+
+	if d1 == d2 {
+		t.Error("swapped hash pairings produced the same digest — pairing is not bound")
+	}
+}
+
+// TestDigestListOrderSensitive verifies that lists with different element
+// orders produce different digests (regression for XOR-commutativity on index).
+func TestDigestListPairBinding(t *testing.T) {
+	db := makeTestDB()
+
+	db.Exec(nil, utils.ToCmdLine("RPUSH", "l1", "x", "y"))
+	db.Exec(nil, utils.ToCmdLine("RPUSH", "l2", "y", "x"))
+
+	e1, _ := db.GetEntity("l1")
+	e2, _ := db.GetEntity("l2")
+
+	d1 := digestKey("l1", e1, nil)
+	d2 := digestKey("l2", e2, nil)
+
+	if d1 == d2 {
+		t.Error("swapped list elements produced the same digest")
+	}
+}
+
+// TestDigestZSetPairBinding verifies that zsets with swapped member-score
+// pairings produce different digests.
+func TestDigestZSetPairBinding(t *testing.T) {
+	db := makeTestDB()
+
+	// ZSet {a:1, b:2}
+	db.Exec(nil, utils.ToCmdLine("ZADD", "z1", "1", "a", "2", "b"))
+	// ZSet {a:2, b:1} — same members, different scores
+	db.Exec(nil, utils.ToCmdLine("ZADD", "z2", "2", "a", "1", "b"))
+
+	e1, _ := db.GetEntity("z1")
+	e2, _ := db.GetEntity("z2")
+
+	d1 := digestKey("z1", e1, nil)
+	d2 := digestKey("z2", e2, nil)
+
+	if d1 == d2 {
+		t.Error("swapped zset score pairings produced the same digest")
+	}
+}
+
 // TestDigestTTLMixed verifies that TTL affects the digest.
 func TestDigestTTLMixed(t *testing.T) {
 	db := makeTestDB()
@@ -392,8 +453,9 @@ func zsetDigest(entity *database.DataEntity) [20]byte {
 		return pairs[i].member < pairs[j].member
 	})
 	for _, p := range pairs {
-		mixDigest(&d, sha1Bytes([]byte(p.member)))
-		mixDigest(&d, sha1Bytes([]byte(strconv.FormatFloat(p.score, 'f', -1, 64))))
+		scoreStr := strconv.FormatFloat(p.score, 'f', -1, 64)
+		blob := append(append([]byte(p.member), 0), []byte(scoreStr)...)
+		mixDigest(&d, sha1Bytes(blob))
 	}
 	return d
 }
@@ -416,8 +478,8 @@ func hashValueDigest(entity *database.DataEntity) [20]byte {
 		return pairs[i].field < pairs[j].field
 	})
 	for _, p := range pairs {
-		mixDigest(&d, sha1Bytes([]byte(p.field)))
-		mixDigest(&d, sha1Bytes(p.value))
+		blob := append(append([]byte(p.field), 0), p.value...)
+		mixDigest(&d, sha1Bytes(blob))
 	}
 	return d
 }
