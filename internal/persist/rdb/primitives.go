@@ -73,6 +73,13 @@ func (w *writer) writeIntString(v int64) error {
 	}
 }
 
+// formatScore serializes a zset score the way the RDB v1 zset type expects:
+// the shortest decimal that round-trips, matching strconv's 'g' default that
+// hdt3213/rdb and redis both accept on load.
+func formatScore(f float64) []byte {
+	return []byte(strconv.FormatFloat(f, 'g', -1, 64))
+}
+
 // tryParseInt reports whether s is a canonical int32-range integer literal
 // (canonical = strconv.FormatInt produces the same bytes, so it round-trips).
 func tryParseInt(s []byte) (int64, bool) {
