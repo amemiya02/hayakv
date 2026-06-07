@@ -95,12 +95,18 @@ func (backlog *replBacklog) getSnapshot() ([]byte, int64) {
 }
 
 func (backlog *replBacklog) getSnapshotAfter(beginOffset int64) ([]byte, int64) {
+	if beginOffset >= backlog.currentOffset {
+		return nil, backlog.currentOffset // fully caught up: no bytes to send
+	}
 	beg := beginOffset - backlog.beginOffset
+	if beg < 0 {
+		beg = 0
+	}
 	return backlog.buf[beg:], backlog.currentOffset
 }
 
 func (backlog *replBacklog) isValidOffset(offset int64) bool {
-	return offset >= backlog.beginOffset && offset < backlog.currentOffset
+	return offset >= backlog.beginOffset && offset <= backlog.currentOffset
 }
 
 type masterStatus struct {

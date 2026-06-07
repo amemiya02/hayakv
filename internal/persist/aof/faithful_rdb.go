@@ -11,6 +11,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/datastruct/set"
 	SortedSet "github.com/amemiya02/hayakv/internal/datastruct/sortedset"
 	"github.com/amemiya02/hayakv/internal/iface/database"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/persist/rdb"
 )
 
@@ -102,8 +103,78 @@ func writeEntity(enc *rdb.Encoder, key string, entity *database.DataEntity, expi
 			return true
 		})
 		return enc.WriteZSetEntry(keyBytes, members, expireMS)
+	case *object.Robj:
+		return writeRobjEntity(enc, keyBytes, obj, expireMS)
 	default:
-		return nil // unknown encodings are skipped (parity with library path)
+		return nil // unknown encodings are skipped
+	}
+}
+
+// writeRobjEntity handles *object.Robj (the primary data path for string SET).
+func writeRobjEntity(enc *rdb.Encoder, key []byte, robj *object.Robj, expireMS uint64) error {
+	switch robj.Type {
+	case object.TypeString:
+		return enc.WriteStringEntry(key, robj.GetStringBytes(), expireMS)
+	case object.TypeList:
+		list, ok := robj.Ptr.(*object.List)
+		if !ok {
+			return nil
+		}
+		vals := make([][]byte, 0, list.Len())
+		list.ForEach(func(_ int, v interface{}) bool {
+			switch b := v.(type) {
+			case []byte:
+				vals = append(vals, b)
+			case string:
+				vals = append(vals, []byte(b))
+			default:
+				vals = append(vals, nil)
+			}
+			return true
+		})
+		return enc.WriteListEntry(key, vals, expireMS)
+	case object.TypeSet:
+		s, ok := robj.Ptr.(*object.Set)
+		if !ok {
+			return nil
+		}
+		vals := make([][]byte, 0, s.Len())
+		s.ForEach(func(m string) bool {
+			vals = append(vals, []byte(m))
+			return true
+		})
+		return enc.WriteSetEntry(key, vals, expireMS)
+	case object.TypeHash:
+		h, ok := robj.Ptr.(*object.Hash)
+		if !ok {
+			return nil
+		}
+		hash := make(map[string][]byte, h.Len())
+		h.ForEach(func(field string, val interface{}) bool {
+			switch v := val.(type) {
+			case []byte:
+				hash[field] = v
+			case string:
+				hash[field] = []byte(v)
+			default:
+				hash[field] = nil
+			}
+			return true
+		})
+		return enc.WriteHashEntry(key, hash, expireMS)
+	case object.TypeZSet:
+		z, ok := robj.Ptr.(*object.ZSet)
+		if !ok {
+			return nil
+		}
+		members := make([]rdb.ZSetMember, 0, z.Len())
+		z.ForEach(func(member string, score float64) bool {
+			members = append(members, rdb.ZSetMember{Member: []byte(member), Score: score})
+			return true
+		})
+		return enc.WriteZSetEntry(key, members, expireMS)
+	default:
+		return nil
 	}
 }
 

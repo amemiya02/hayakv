@@ -3,10 +3,12 @@ package server
 import (
 	"fmt"
 	"path/filepath"
+	"time"
 	"strings"
 
 	"github.com/amemiya02/hayakv/config"
 	database "github.com/amemiya02/hayakv/internal/command"
+	ifaceDB "github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/datastruct/dict"
 	"github.com/amemiya02/hayakv/internal/iface"
 	"github.com/amemiya02/hayakv/internal/net/eventloop"
@@ -55,7 +57,9 @@ func NewStorageEngine(cfg *config.ServerProperties) (iface.StorageEngine, error)
 		if cfg.NetBackend == NetGoroutine {
 			return NewLockedEngine(inner), nil
 		}
-		// For eventloop (future), locking is external.
+		// For eventloop, locking is external and serverCron must not run as a
+		// background goroutine (it would race the single loop goroutine).
+		inner.DisableCron()
 		return inner, nil
 	default:
 		return nil, fmt.Errorf("unknown engine backend %q", cfg.EngineBackend)
@@ -123,6 +127,26 @@ func MaybeWrapCluster(cfg *config.ServerProperties, engine iface.StorageEngine) 
 	ce, err := rediscluster.NewClusterEngineFromConfig(engine, ip, cfg.Port, confPath)
 	if err != nil {
 		return nil, err
+	}
+	// Wire real keyspace introspection for CLUSTER COUNTKEYSINSLOT/GETKEYSINSLOT.
+	if srv, ok := engine.(*database.Server); ok {
+		ce.SetKeysInSlot(func(slot uint16, count int) []string {
+			var keys []string
+			srv.ForEach(0, func(key string, _ *ifaceDB.DataEntity, _ *time.Time) bool {
+				if rediscluster.Key2Slot(key) == slot {
+					keys = append(keys, key)
+					if count > 0 && len(keys) >= count {
+						return false
+					}
+				}
+				return true
+			})
+			return keys
+		})
+		ce.SetKeyExists(func(key string) bool {
+			_, ok := srv.GetEntity(0, key)
+			return ok
+		})
 	}
 	return ce, nil
 }

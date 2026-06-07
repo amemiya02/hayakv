@@ -44,7 +44,14 @@ type Server struct {
 
 	// serverCronDone signals the serverCron goroutine to stop on Close().
 	serverCronDone chan struct{}
+
+	// disableCron prevents startServerCron from launching (eventloop backend).
+	disableCron bool
 }
+
+// DisableCron prevents startServerCron from launching a background goroutine.
+// Called when the eventloop net backend is active (single-threaded command execution).
+func (server *Server) DisableCron() { server.disableCron = true }
 
 func fileExists(filename string) bool {
 	info, err := os.Stat(filename)
@@ -94,7 +101,13 @@ func NewStandaloneServer() *Server {
 	server.slaveStatus = initReplSlaveStatus()
 	server.initMasterStatus()
 	server.startReplCron()
-	server.startServerCron()
+	// M5: startServerCron is called only for goroutine backend.
+	// For eventloop, active-expire should be invoked inline from the loop tick.
+	// The caller (NewStorageEngine/NewNetServerWithEngine) sets server.disableCron
+	// before reaching here if the eventloop backend is active.
+	if !server.disableCron {
+		server.startServerCron()
+	}
 	server.role = masterRole // The initialization process does not require atomicity
 
 	// record slow log

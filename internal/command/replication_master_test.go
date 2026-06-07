@@ -344,11 +344,11 @@ func TestBacklogValidOffsetAfterTrim(t *testing.T) {
 	if !b.isValidOffset(2) { // == beginOffset: still in window
 		t.Fatalf("offset 2 should be valid")
 	}
-	if !b.isValidOffset(5) { // within [2,6)
+	if !b.isValidOffset(5) { // within [2,6]
 		t.Fatalf("offset 5 should be valid")
 	}
-	if b.isValidOffset(6) { // == currentOffset: not yet produced
-		t.Fatalf("offset 6 should be invalid")
+	if !b.isValidOffset(6) { // == currentOffset: caught-up replica, valid +CONTINUE
+		t.Fatalf("offset 6 should be valid (caught-up replica)")
 	}
 	snap, cur := b.getSnapshotAfter(4) // bytes from offset 4 → "ef"
 	if string(snap) != "ef" || cur != 6 {

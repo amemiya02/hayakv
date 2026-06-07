@@ -189,11 +189,11 @@ func (server *Server) freeMemoryIfNeeded() bool {
 	if limit <= 0 {
 		return true // unlimited
 	}
+	if config.Properties.MaxmemoryPolicy == "noeviction" || config.Properties.MaxmemoryPolicy == "" {
+		return server.usedMemory() <= limit
+	}
 	if server.usedMemory() <= limit {
 		return true
-	}
-	if config.Properties.MaxmemoryPolicy == "noeviction" || config.Properties.MaxmemoryPolicy == "" {
-		return false
 	}
 	for loops := 0; loops < maxEvictLoops; loops++ {
 		if server.usedMemory() <= limit {

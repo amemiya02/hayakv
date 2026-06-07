@@ -96,7 +96,7 @@ func (ce *ClusterEngine) Exec(c iredis.Connection, cmdLine iface.CmdLine) iredis
 }
 
 func (ce *ClusterEngine) AfterClientClose(c iredis.Connection) { ce.inner.AfterClientClose(c) }
-func (ce *ClusterEngine) Close()                               { ce.inner.Close() }
+func (ce *ClusterEngine) Close()                               { ce.StopBus(); ce.inner.Close() }
 
 // StartBus launches the gossip cluster bus and wires CLUSTER MEET to it.
 func (ce *ClusterEngine) StartBus() error {
