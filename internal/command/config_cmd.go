@@ -49,6 +49,7 @@ func configGet(param string) [][]byte {
 		"hash-max-listpack-entries": func() string { return strconv.Itoa(config.Properties.HashMaxListpackEntries) },
 		"set-max-intset-entries":    func() string { return strconv.Itoa(config.Properties.SetMaxIntsetEntries) },
 		"zset-max-listpack-entries": func() string { return strconv.Itoa(config.Properties.ZSetMaxListpackEntries) },
+		"notify-keyspace-events":    func() string { return config.Properties.NotifyKeyspaceEvents },
 	}
 
 	// Build the matching predicate. If param contains a wildcard character, use
@@ -114,6 +115,11 @@ func configSet(param, value string) redis.Reply {
 		default:
 			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'appendonly'")
 		}
+	case "notify-keyspace-events":
+		if !validNotifyFlags(value) {
+			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'notify-keyspace-events'")
+		}
+		config.Properties.NotifyKeyspaceEvents = value
 	default:
 		// Unknown-but-tolerated: Redis accepts many params we don't model.
 		return protocol.MakeOkReply()

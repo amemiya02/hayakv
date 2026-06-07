@@ -87,6 +87,9 @@ type ServerProperties struct {
 	// scripting
 	BusyReplyThreshold int64 `cfg:"busy-reply-threshold"` // Lua script timeout in ms (default 5000)
 
+	// keyspace notifications
+	NotifyKeyspaceEvents string `cfg:"notify-keyspace-events"` // flags string e.g. "KEA", "Elg"; empty = disabled
+
 	rawConfig map[string]string // populated by parse(); used by normalizeMemoryConfig
 }
 
