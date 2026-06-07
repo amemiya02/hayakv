@@ -54,6 +54,10 @@ type ServerProperties struct {
 	ClusterEnable     bool   `cfg:"cluster-enable"`
 	ClusterAsSeed     bool   `cfg:"cluster-as-seed"`
 	ClusterSeed       string `cfg:"cluster-seed"`
+	// Cluster flavor selector: "redis" => real Redis Cluster (internal/rediscluster);
+	// anything else (incl. empty) => legacy raft proxy (internal/cluster) for back-compat.
+	ClusterMode       string `cfg:"cluster-mode"`
+	ClusterConfigFile string `cfg:"cluster-config-file"`
 	RaftListenAddr    string `cfg:"raft-listen-address"`
 	RaftAdvertiseAddr string `cfg:"raft-advertise-address"`
 	// If the node join the cluster as a replica of another node,
@@ -141,6 +145,8 @@ func init() {
 		MaxmemoryPolicy:  "noeviction",
 		MaxmemorySamples: 5,
 		Hz:               10,
+
+		ClusterConfigFile: "nodes.conf",
 	}
 }
 

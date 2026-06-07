@@ -96,3 +96,16 @@ func TestMemoryConfigDefaults(t *testing.T) {
 		t.Fatalf("default maxmemory = %d, want 0 (unlimited)", Properties.Maxmemory)
 	}
 }
+
+func TestParseClusterMode(t *testing.T) {
+	p := parse(strings.NewReader("cluster-enable yes\ncluster-mode redis\ncluster-config-file nodes.conf\nport 7000\n"))
+	if !p.ClusterEnable {
+		t.Fatal("cluster-enable not parsed")
+	}
+	if p.ClusterMode != "redis" {
+		t.Fatalf("cluster-mode = %q, want redis", p.ClusterMode)
+	}
+	if p.ClusterConfigFile != "nodes.conf" {
+		t.Fatalf("cluster-config-file = %q", p.ClusterConfigFile)
+	}
+}
