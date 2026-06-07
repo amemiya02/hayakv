@@ -6,7 +6,7 @@
 
 > English version: [README.md](./README.md)
 
-**hayakv** 是一个用 Go 编写的 Redis 兼容键值服务器。日语中はや（*haya*）是快的意思。，*hayakv* 的拼写也与 はやく（*hayaku*）相近，意为“快速”，并且 KV 结尾。
+**hayakv** 是一个用 Go 编写的 Redis 兼容键值服务器。日语中はや（*haya*）是快的意思，*hayakv* 的拼写也与 はやく（*hayaku*）相近，意为“快速”，并且 KV 结尾。
 
 这是一个学习项目：目标是通过亲手忠实重写来理解 Redis 内核——数据结构、编码、网络模型、
 协议、持久化、复制与集群，对标 [Redis 8.x](https://github.com/redis/redis)。

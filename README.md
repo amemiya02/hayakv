@@ -6,7 +6,7 @@
 
 > 中文版见 [README_CN.md](./README_CN.md)
 
-**hayakv** is a Redis-compatible key-value server written in Go. haya means fast in Japanese — and *hayakv* reads like はやく (*hayaku*, "quickly")
+**hayakv** is a Redis-compatible key-value server written in Go. はや (haya) means fast in Japanese — and *hayakv* reads like はやく (*hayaku*, "quickly")
 with a KV ending.
 
 It is a learning project: the goal is to understand the Redis kernel — data structures,
