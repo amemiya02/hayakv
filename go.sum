@@ -69,6 +69,8 @@ github.com/hashicorp/raft-boltdb v0.0.0-20231211162105-6c830fa4535e h1:SK4y8oR4Z
 github.com/hashicorp/raft-boltdb v0.0.0-20231211162105-6c830fa4535e/go.mod h1:EMz/UIuG93P0MBeHh6CbXQAEe8ckVJLZjhD17lBzK5Q=
 github.com/hdt3213/rdb v1.0.18 h1:mfYKZBkowTWR8uNWUnvL48GsE7RdDH1i7mnDa/eFwzc=
 github.com/hdt3213/rdb v1.0.18/go.mod h1:p2O7ep2/CDdaZt4gywZevL6Vdjash4+imZ0wpinogm8=
+github.com/hdt3213/rdb v1.3.2 h1:Dk6lUbQY2d8izSVG1I3Uhtan53dNxj/J+dVH7OVSvTU=
+github.com/hdt3213/rdb v1.3.2/go.mod h1:DB7fVcqhNuPsX4lcv0AOOHKQE6mXhaIcxZvbVIfalAU=
 github.com/json-iterator/go v1.1.6/go.mod h1:+SdeFBvtyEkXs7REEP0seUULqWtbJapLOCVDaaPEHmU=
 github.com/json-iterator/go v1.1.9/go.mod h1:KdQUCv79m/52Kvf8AW2vK1V8akMuk1QjK/uOdHXbAo4=
 github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7VTCxuUUipMqKk8s4w=

@@ -5,7 +5,7 @@ go 1.24
 require (
 	github.com/hashicorp/raft v1.7.0
 	github.com/hashicorp/raft-boltdb v0.0.0-20231211162105-6c830fa4535e
-	github.com/hdt3213/rdb v1.0.18
+	github.com/hdt3213/rdb v1.3.2
 	github.com/panjf2000/gnet/v2 v2.7.2
 	github.com/redis/go-redis/v9 v9.20.0
 )
