@@ -201,21 +201,20 @@ func TestDigestSetEncodingIndependence(t *testing.T) {
 }
 
 // TestDigestListOrderSensitive verifies that lists with different element
-// orders produce different value-only digests.
+// orders produce different digests. Uses two DBs with the same key name
+// so the key contribution cancels and we test production digestKey directly.
 func TestDigestListOrderSensitive(t *testing.T) {
-	db := makeTestDB()
+	db1 := makeTestDB()
+	db2 := makeTestDB()
 
-	db.Exec(nil, utils.ToCmdLine("RPUSH", "list1", "a", "b", "c"))
-	db.Exec(nil, utils.ToCmdLine("RPUSH", "list2", "c", "b", "a"))
+	db1.Exec(nil, utils.ToCmdLine("RPUSH", "k", "a", "b", "c"))
+	db2.Exec(nil, utils.ToCmdLine("RPUSH", "k", "c", "b", "a"))
 
-	entity1, _ := db.GetEntity("list1")
-	entity2, _ := db.GetEntity("list2")
+	e1, _ := db1.GetEntity("k")
+	e2, _ := db2.GetEntity("k")
 
-	d1 := listDigest(entity1)
-	d2 := listDigest(entity2)
-
-	if d1 == d2 {
-		t.Error("different list orderings produced the same value digest")
+	if digestKey("k", e1, nil) == digestKey("k", e2, nil) {
+		t.Error("different list orderings not detected by production digestKey")
 	}
 }
 
@@ -276,66 +275,56 @@ func TestDigestZSetEncodingIndependence(t *testing.T) {
 }
 
 // TestDigestHashPairBinding verifies that hashes with swapped field-value
-// pairings produce different value-only digests. Uses hashValueDigest to
-// exclude the key name, so the test isolates the pairing logic.
+// pairings produce different digests. Uses two DBs with the same key name
+// so the key contribution cancels and we test production digestKey directly.
 func TestDigestHashPairBinding(t *testing.T) {
-	db := makeTestDB()
+	db1 := makeTestDB()
+	db2 := makeTestDB()
 
-	// Hash {a:1, b:2}
-	db.Exec(nil, utils.ToCmdLine("HSET", "h1", "a", "1", "b", "2"))
-	// Hash {a:2, b:1} — same fields, same values, different pairing
-	db.Exec(nil, utils.ToCmdLine("HSET", "h2", "a", "2", "b", "1"))
+	db1.Exec(nil, utils.ToCmdLine("HSET", "k", "a", "1", "b", "2"))
+	db2.Exec(nil, utils.ToCmdLine("HSET", "k", "a", "2", "b", "1"))
 
-	e1, _ := db.GetEntity("h1")
-	e2, _ := db.GetEntity("h2")
+	e1, _ := db1.GetEntity("k")
+	e2, _ := db2.GetEntity("k")
 
-	d1 := hashValueDigest(e1)
-	d2 := hashValueDigest(e2)
-
-	if d1 == d2 {
-		t.Error("swapped hash pairings produced the same value digest — pairing is not bound")
+	if digestKey("k", e1, nil) == digestKey("k", e2, nil) {
+		t.Error("swapped hash pairings not detected by production digestKey")
 	}
 }
 
 // TestDigestListPairBinding verifies that lists with different element
-// orders produce different value-only digests. Uses listDigest to exclude
-// the key name, so the test isolates the index↔value binding.
+// orders produce different digests. Uses two DBs with the same key name
+// so the key contribution cancels and we test production digestKey directly.
 func TestDigestListPairBinding(t *testing.T) {
-	db := makeTestDB()
+	db1 := makeTestDB()
+	db2 := makeTestDB()
 
-	db.Exec(nil, utils.ToCmdLine("RPUSH", "samekey", "x", "y"))
-	db.Exec(nil, utils.ToCmdLine("RPUSH", "samekey2", "y", "x"))
+	db1.Exec(nil, utils.ToCmdLine("RPUSH", "k", "x", "y"))
+	db2.Exec(nil, utils.ToCmdLine("RPUSH", "k", "y", "x"))
 
-	e1, _ := db.GetEntity("samekey")
-	e2, _ := db.GetEntity("samekey2")
+	e1, _ := db1.GetEntity("k")
+	e2, _ := db2.GetEntity("k")
 
-	d1 := listDigest(e1)
-	d2 := listDigest(e2)
-
-	if d1 == d2 {
-		t.Error("swapped list elements produced the same value digest — order is not bound")
+	if digestKey("k", e1, nil) == digestKey("k", e2, nil) {
+		t.Error("list order not captured by production digestKey")
 	}
 }
 
 // TestDigestZSetPairBinding verifies that zsets with swapped member-score
-// pairings produce different value-only digests. Uses zsetDigest to exclude
-// the key name, so the test isolates the pairing logic.
+// pairings produce different digests. Uses two DBs with the same key name
+// so the key contribution cancels and we test production digestKey directly.
 func TestDigestZSetPairBinding(t *testing.T) {
-	db := makeTestDB()
+	db1 := makeTestDB()
+	db2 := makeTestDB()
 
-	// ZSet {a:1, b:2}
-	db.Exec(nil, utils.ToCmdLine("ZADD", "z1", "1", "a", "2", "b"))
-	// ZSet {a:2, b:1} — same members, different scores
-	db.Exec(nil, utils.ToCmdLine("ZADD", "z2", "2", "a", "1", "b"))
+	db1.Exec(nil, utils.ToCmdLine("ZADD", "k", "1", "a", "2", "b"))
+	db2.Exec(nil, utils.ToCmdLine("ZADD", "k", "2", "a", "1", "b"))
 
-	e1, _ := db.GetEntity("z1")
-	e2, _ := db.GetEntity("z2")
+	e1, _ := db1.GetEntity("k")
+	e2, _ := db2.GetEntity("k")
 
-	d1 := zsetDigest(e1)
-	d2 := zsetDigest(e2)
-
-	if d1 == d2 {
-		t.Error("swapped zset score pairings produced the same value digest")
+	if digestKey("k", e1, nil) == digestKey("k", e2, nil) {
+		t.Error("swapped zset score pairings not detected by production digestKey")
 	}
 }
 
