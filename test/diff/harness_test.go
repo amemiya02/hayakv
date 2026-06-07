@@ -1,7 +1,8 @@
 package diff
 
-// TODO: Add normalization hooks for non-deterministic commands (INFO, TIME, random)
-// before adding them to the corpus. The current harness requires byte-for-byte equality.
+// NOTE: used_memory / INFO memory / approximate-LRU eviction order are non-deterministic;
+// the M5 corpus covers only TTL/expire/PERSIST/EXPIRETIME and OOM-under-noeviction
+// (byte-stable). Add normalization hooks before diffing memory.
 
 import (
 	"bufio"
@@ -358,6 +359,64 @@ func TestM0DifferentialRESP2(t *testing.T) {
 			for i := range hayakvReplies {
 				if !bytes.Equal(hayakvReplies[i], redisReplies[i]) {
 					t.Fatalf("command %v\nhayakv: %q\nredis:  %q", scenario.Commands[i].Args, hayakvReplies[i], redisReplies[i])
+				}
+			}
+		})
+	}
+}
+
+// startHayakvM5 boots hayakv (goroutine+redisdb+resp2) with extra config lines
+// appended (e.g. "maxmemory-policy allkeys-lru\n"). Mirrors startHayakvWithConfig
+// but allows M5 keys the fixed helper cannot express.
+func startHayakvM5(t *testing.T, extra string) (string, func()) {
+	t.Helper()
+	root := projectRoot(t)
+	tmp := t.TempDir()
+	bin := filepath.Join(tmp, "hayakv")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/hayakv")
+	build.Dir = root
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build hayakv: %v\n%s", err, out)
+	}
+	port := freePort(t)
+	conf := filepath.Join(tmp, "redis.conf")
+	body := fmt.Sprintf("bind 127.0.0.1\nport %d\ndir %s\ndatabases 16\nnet goroutine\nengine redisdb\nproto-max resp2\n%s", port, tmp, extra)
+	if err := os.WriteFile(conf, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "CONFIG="+conf)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start hayakv: %v", err)
+	}
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	waitForPing(t, addr)
+	return addr, func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	}
+}
+
+func TestM5Differential(t *testing.T) {
+	hayakvAddr, stopHayakv := startHayakvM5(t, "")
+	defer stopHayakv()
+	redisAddr, stopRedis := startRedis8(t)
+	defer stopRedis()
+
+	for _, scenario := range m5Corpus() {
+		scenario := scenario
+		t.Run(scenario.Name, func(t *testing.T) {
+			hayakvReplies := runScenario(t, hayakvAddr, scenario)
+			redisReplies := runScenario(t, redisAddr, scenario)
+			if len(hayakvReplies) != len(redisReplies) {
+				t.Fatalf("reply count hayakv=%d redis=%d", len(hayakvReplies), len(redisReplies))
+			}
+			for i := range hayakvReplies {
+				if !bytes.Equal(hayakvReplies[i], redisReplies[i]) {
+					t.Fatalf("command %v\nhayakv: %q\nredis:  %q",
+						scenario.Commands[i].Args, hayakvReplies[i], redisReplies[i])
 				}
 			}
 		})
