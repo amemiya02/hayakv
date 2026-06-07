@@ -11,12 +11,18 @@ type Hub struct {
 	subs dict.Dict
 	// lock channel
 	subsLocker *lock.Locks
+	// pattern -> list(*Client)
+	patterns dict.Dict
+	// lock pattern
+	patternLock *lock.Locks
 }
 
 // MakeHub creates new hub
 func MakeHub() *Hub {
 	return &Hub{
-		subs:       dict.MakeConcurrent(4),
-		subsLocker: lock.Make(16),
+		subs:        dict.MakeConcurrent(4),
+		subsLocker:  lock.Make(16),
+		patterns:    dict.MakeConcurrent(4),
+		patternLock: lock.Make(16),
 	}
 }

@@ -99,6 +99,8 @@ func UnsubscribeAll(hub *Hub, c redis.Connection) {
 		unsubscribe0(hub, channel, c)
 	}
 
+	// also unsubscribe from all patterns
+	PUnsubscribeAll(hub, c)
 }
 
 // UnSubscribe removes the given connection from the given channel
@@ -140,19 +142,24 @@ func Publish(hub *Hub, args [][]byte) redis.Reply {
 	hub.subsLocker.Lock(channel)
 	defer hub.subsLocker.UnLock(channel)
 
+	var count int
 	raw, ok := hub.subs.Get(channel)
-	if !ok {
-		return protocol.MakeIntReply(0)
+	if ok {
+		subscribers, _ := raw.(*list.LinkedList)
+		subscribers.ForEach(func(i int, c interface{}) bool {
+			client, _ := c.(redis.Connection)
+			replyArgs := make([][]byte, 3)
+			replyArgs[0] = messageBytes
+			replyArgs[1] = []byte(channel)
+			replyArgs[2] = message
+			_, _ = client.Write(protocol.MakeMultiBulkReply(replyArgs).ToBytes())
+			return true
+		})
+		count = subscribers.Len()
 	}
-	subscribers, _ := raw.(*list.LinkedList)
-	subscribers.ForEach(func(i int, c interface{}) bool {
-		client, _ := c.(redis.Connection)
-		replyArgs := make([][]byte, 3)
-		replyArgs[0] = messageBytes
-		replyArgs[1] = []byte(channel)
-		replyArgs[2] = message
-		_, _ = client.Write(protocol.MakeMultiBulkReply(replyArgs).ToBytes())
-		return true
-	})
-	return protocol.MakeIntReply(int64(subscribers.Len()))
+
+	// also deliver to pattern subscribers
+	count += publishToPatterns(hub, channel, message)
+
+	return protocol.MakeIntReply(int64(count))
 }

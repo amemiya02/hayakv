@@ -34,6 +34,9 @@ type Connection struct {
 	// subscribing channels
 	subs map[string]bool
 
+	// pattern subscriptions
+	pSubs map[string]bool
+
 	// password may be changed by CONFIG command during runtime, so store the password
 	password string
 
@@ -90,6 +93,7 @@ func (c *Connection) Close() error {
 		_ = c.conn.Close()
 	}
 	c.subs = nil
+	c.pSubs = nil
 	c.password = ""
 	c.queue = nil
 	c.watching = nil
@@ -175,6 +179,47 @@ func (c *Connection) GetChannels() []string {
 		i++
 	}
 	return channels
+}
+
+// PSubscribe adds current connection into subscribers of the given pattern
+func (c *Connection) PSubscribe(pattern string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.pSubs == nil {
+		c.pSubs = make(map[string]bool)
+	}
+	c.pSubs[pattern] = true
+}
+
+// PUnSubscribe removes current connection from subscribers of the given pattern
+func (c *Connection) PUnSubscribe(pattern string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(c.pSubs) == 0 {
+		return
+	}
+	delete(c.pSubs, pattern)
+}
+
+// PatternCount returns the number of pattern subscriptions
+func (c *Connection) PatternCount() int {
+	return len(c.pSubs)
+}
+
+// GetPatterns returns all subscribed patterns
+func (c *Connection) GetPatterns() []string {
+	if c.pSubs == nil {
+		return make([]string, 0)
+	}
+	patterns := make([]string, len(c.pSubs))
+	i := 0
+	for pattern := range c.pSubs {
+		patterns[i] = pattern
+		i++
+	}
+	return patterns
 }
 
 // SetPassword stores password for authentication

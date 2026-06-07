@@ -94,6 +94,10 @@ func (connStub) Subscribe(string)               {}
 func (connStub) UnSubscribe(string)             {}
 func (connStub) SubsCount() int                 { return 0 }
 func (connStub) GetChannels() []string          { return nil }
+func (connStub) PSubscribe(string)              {}
+func (connStub) PUnSubscribe(string)            {}
+func (connStub) PatternCount() int              { return 0 }
+func (connStub) GetPatterns() []string          { return nil }
 func (connStub) InMultiState() bool             { return false }
 func (connStub) SetMultiState(bool)             {}
 func (connStub) GetQueuedCmdLine() [][][]byte   { return nil }

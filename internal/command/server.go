@@ -244,6 +244,15 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 		return pubsub.Publish(server.hub, cmdLine[1:])
 	} else if cmdName == "unsubscribe" {
 		return pubsub.UnSubscribe(server.hub, c, cmdLine[1:])
+	} else if cmdName == "psubscribe" {
+		if len(cmdLine) < 2 {
+			return protocol.MakeArgNumErrReply("psubscribe")
+		}
+		return pubsub.PSubscribe(server.hub, c, cmdLine[1:])
+	} else if cmdName == "punsubscribe" {
+		return pubsub.PUnsubscribe(server.hub, c, cmdLine[1:])
+	} else if cmdName == "pubsub" {
+		return pubsub.PubSub(server.hub, cmdLine[1:])
 	} else if cmdName == "bgrewriteaof" {
 		if !config.Properties.AppendOnly {
 			return protocol.MakeErrReply("AppendOnly is false, you can't rewrite aof file")
