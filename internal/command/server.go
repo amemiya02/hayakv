@@ -499,6 +499,21 @@ func (server *Server) SetKeyInsertedCallback(cb database.KeyEventCallback) {
 
 }
 
+// usedMemory returns the approximate total bytes held across all databases.
+// Deterministic for fixed inputs; NOT byte-comparable with Redis used_memory.
+func (server *Server) usedMemory() int64 {
+	var total int64
+	for i := range server.dbSet {
+		db := server.mustSelectDB(i)
+		db.data.ForEach(func(key string, raw interface{}) bool {
+			entity, _ := raw.(*database.DataEntity)
+			total += estimateEntitySize(key, entity)
+			return true
+		})
+	}
+	return total
+}
+
 func (server *Server) SetKeyDeletedCallback(cb database.KeyEventCallback) {
 	server.deleteCallback = cb
 	for i := range server.dbSet {
