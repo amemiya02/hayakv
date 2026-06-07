@@ -21,6 +21,7 @@ func seedKeys(db *DB, n int, withTTL bool) {
 func TestPolicyNoevictionReturnsError(t *testing.T) {
 	config.Properties.MaxmemoryPolicy = "noeviction"
 	config.Properties.Maxmemory = 1 // 1 byte: always over
+	defer func() { config.Properties.Maxmemory = 0; config.Properties.MaxmemoryPolicy = "noeviction" }()
 	s := NewStandaloneServer()
 	defer s.Close()
 	seedKeys(s.mustSelectDB(0), 10, false)
@@ -32,6 +33,7 @@ func TestPolicyNoevictionReturnsError(t *testing.T) {
 func TestPolicyAllkeysRandomEvictsSomething(t *testing.T) {
 	config.Properties.MaxmemoryPolicy = "allkeys-random"
 	config.Properties.MaxmemorySamples = 5
+	defer func() { config.Properties.Maxmemory = 0; config.Properties.MaxmemoryPolicy = "noeviction" }()
 	s := NewStandaloneServer()
 	defer s.Close()
 	db := s.mustSelectDB(0)
@@ -49,6 +51,7 @@ func TestPolicyAllkeysRandomEvictsSomething(t *testing.T) {
 func TestPolicyVolatileOnlyTouchesTTLKeys(t *testing.T) {
 	config.Properties.MaxmemoryPolicy = "volatile-lru"
 	config.Properties.MaxmemorySamples = 5
+	defer func() { config.Properties.Maxmemory = 0; config.Properties.MaxmemoryPolicy = "noeviction" }()
 	s := NewStandaloneServer()
 	defer s.Close()
 	db := s.mustSelectDB(0)
@@ -77,6 +80,7 @@ func TestPolicyVolatileOnlyTouchesTTLKeys(t *testing.T) {
 
 func TestEvictionCandidatePicksColdestLRU(t *testing.T) {
 	config.Properties.MaxmemoryPolicy = "allkeys-lru"
+	defer func() { config.Properties.Maxmemory = 0; config.Properties.MaxmemoryPolicy = "noeviction" }()
 	s := NewStandaloneServer()
 	defer s.Close()
 	db := s.mustSelectDB(0)

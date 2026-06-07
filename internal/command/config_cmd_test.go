@@ -12,6 +12,7 @@ import (
 
 func TestConfigGetSetMaxmemoryPolicy(t *testing.T) {
 	config.Properties.MaxmemoryPolicy = "noeviction"
+	defer func() { config.Properties.MaxmemoryPolicy = "noeviction" }()
 	var _ iredis.Connection = connection.NewConn(nil)
 
 	set := execConfig([][]byte{[]byte("SET"), []byte("maxmemory-policy"), []byte("allkeys-lru")})
