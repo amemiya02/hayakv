@@ -10,6 +10,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/lib/logger"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
 	stdserver "github.com/amemiya02/hayakv/internal/net/goroutine"
+	"github.com/amemiya02/hayakv/internal/rediscluster"
 	"github.com/amemiya02/hayakv/internal/server"
 )
 
@@ -75,6 +76,14 @@ func main() {
 		logger.Errorf("%s", msg)
 		fmt.Fprintln(os.Stderr, msg)
 		return
+	}
+
+	if ce, ok := engine.(*rediscluster.ClusterEngine); ok {
+		if err := ce.StartBus(); err != nil {
+			logger.Errorf("cluster bus failed: %v", err)
+			fmt.Fprintln(os.Stderr, "cluster bus failed:", err)
+			return
+		}
 	}
 
 	netServer, err := server.NewNetServerWithEngine(config.Properties, engine)

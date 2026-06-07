@@ -115,6 +115,45 @@ func (s *clusterState) assignedSlots() int {
 func (s *clusterState) stateOK() bool { return s.assignedSlots() == slotCount }
 
 // snapshotNodes returns a stable slice of nodes for read-only rendering.
+
+func (s *clusterState) forgetNode(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n := s.nodes[id]; n != nil {
+		for i := range s.slots {
+			if s.slots[i] == n {
+				s.slots[i] = nil
+			}
+		}
+		delete(s.nodes, id)
+	}
+}
+
+func (s *clusterState) reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.slots {
+		s.slots[i] = nil
+	}
+	for s2 := uint16(0); s2 < slotCount; s2++ {
+		s.self.delSlot(s2)
+	}
+	s.nodes = map[string]*clusterNode{s.self.id: s.self}
+	s.migrations = map[uint16]*migration{}
+	s.epoch = 0
+}
+
+func (s *clusterState) replicate(masterID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.nodes[masterID]; !ok {
+		return false
+	}
+	s.self.flags &^= flagMaster
+	s.self.flags |= flagSlave
+	s.self.masterID = masterID
+	return true
+}
 func (s *clusterState) snapshotNodes() []*clusterNode {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -18,6 +18,7 @@ type ClusterEngine struct {
 	state     *clusterState
 	commands  *clusterCommands
 	keyExists keyExistsFunc
+	bus       *gossipBus
 }
 
 // NewClusterEngine wraps inner with redirection driven by state. keysInSlot scans
@@ -96,6 +97,23 @@ func (ce *ClusterEngine) Exec(c iredis.Connection, cmdLine iface.CmdLine) iredis
 
 func (ce *ClusterEngine) AfterClientClose(c iredis.Connection) { ce.inner.AfterClientClose(c) }
 func (ce *ClusterEngine) Close()                               { ce.inner.Close() }
+
+// StartBus launches the gossip cluster bus and wires CLUSTER MEET to it.
+func (ce *ClusterEngine) StartBus() error {
+	ce.bus = newGossipBus(ce.state)
+	if err := ce.bus.start(); err != nil {
+		return err
+	}
+	ce.commands.setMeetFn(ce.bus.meet)
+	return nil
+}
+
+// StopBus stops the gossip bus (used on shutdown / in tests).
+func (ce *ClusterEngine) StopBus() {
+	if ce.bus != nil {
+		ce.bus.stop()
+	}
+}
 
 // NewClusterEngineFromConfig builds a ClusterEngine, generating or reloading the
 // node identity/slot map from confPath.

@@ -17,10 +17,15 @@ type clusterCommands struct {
 	state        *clusterState
 	keysInSlot   keysInSlotFunc
 	myAnnounceIP string
+	meetFn       func(ip string, port, cport int) error
 }
 
 func newClusterCommands(state *clusterState, keysInSlot keysInSlotFunc) *clusterCommands {
 	return &clusterCommands{state: state, keysInSlot: keysInSlot}
+}
+
+func (c *clusterCommands) setMeetFn(fn func(ip string, port, cport int) error) {
+	c.meetFn = fn
 }
 
 // handle dispatches a full "CLUSTER ..." command line. The leading token MUST be
@@ -202,6 +207,47 @@ func (c *clusterCommands) handleAdmin(sub string, args [][]byte) iredis.Reply {
 		return c.addDelSlotsRange(args, false)
 	case "SETSLOT":
 		return c.setSlot(args)
+	case "MEET":
+		if len(args) < 2 {
+			return protocol.MakeArgNumErrReply("cluster|meet")
+		}
+		if c.meetFn == nil {
+			return protocol.MakeErrReply("ERR cluster bus not running")
+		}
+		port, e := strconv.Atoi(string(args[1]))
+		if e != nil {
+			return protocol.MakeErrReply("ERR Invalid port")
+		}
+		cport := port + 10000
+		if len(args) >= 3 {
+			if cp, e2 := strconv.Atoi(string(args[2])); e2 == nil {
+				cport = cp
+			}
+		}
+		if err := c.meetFn(string(args[0]), port, cport); err != nil {
+			return protocol.MakeErrReply("ERR " + err.Error())
+		}
+		return protocol.MakeOkReply()
+	case "FORGET":
+		if len(args) != 1 {
+			return protocol.MakeArgNumErrReply("cluster|forget")
+		}
+		c.state.forgetNode(string(args[0]))
+		_ = c.state.save()
+		return protocol.MakeOkReply()
+	case "RESET":
+		c.state.reset()
+		_ = c.state.save()
+		return protocol.MakeOkReply()
+	case "REPLICATE":
+		if len(args) != 1 {
+			return protocol.MakeArgNumErrReply("cluster|replicate")
+		}
+		if !c.state.replicate(string(args[0])) {
+			return protocol.MakeErrReply("ERR Unknown node " + string(args[0]))
+		}
+		_ = c.state.save()
+		return protocol.MakeOkReply()
 	}
 	return nil
 }
