@@ -1,0 +1,70 @@
+# TCL test manifest — governed ledger of in-scope / out-of-scope upstream files.
+#
+# Coverage gate (TestTCLManifestCoversEveryInScopeFile) enforces that every
+# in-scope file from the upstream redis/tests tree appears here.
+#
+# STATUS VALUES:
+#   pass     — file is expected to pass; runner executes it
+#   partial  — file passes with some tests skipped (list them in "skips")
+#   excluded — file is intentionally out of scope (reason required)
+#
+# OUT OF SCOPE (entire directories):
+#   tests/unit/moduleapi/*          -> modules out of project scope
+#   tests/sentinel/*                -> Sentinel excluded
+#   tests/unit/oom-score-adj.tcl    -> OS-specific cgroup tweak
+#   tests/support/*                 -> test infrastructure, not test files
+#   tests/cluster/*                 -> Redis Cluster protocol tests (hayakv cluster is Raft-based)
+#   tests/unit/scripting.tcl        -> EVAL/SCRIPT land in M10
+#   tests/unit/introspection.tcl    -> CLIENT family M11; file pass M12
+#   tests/unit/networking.tcl       -> CLIENT/CONN info; M11
+
+files:
+  # -----------------------------------------------------------------------
+  # tests/unit/type/*
+  # -----------------------------------------------------------------------
+  - {file: tests/unit/type/string.tcl,  status: pass}
+  - {file: tests/unit/type/incr.tcl,    status: pass}
+  - {file: tests/unit/type/list.tcl,    status: pass}
+  - {file: tests/unit/type/hash.tcl,    status: pass}
+  - {file: tests/unit/type/set.tcl,     status: pass}
+  - {file: tests/unit/type/zset.tcl,    status: pass}
+
+  # -----------------------------------------------------------------------
+  # tests/unit/* (top-level unit tests)
+  # -----------------------------------------------------------------------
+  - {file: tests/unit/auth.tcl,            status: excluded, reason: "AUTH config matrix not yet wired"}
+  - {file: tests/unit/bitops.tcl,          status: excluded, reason: "bit-command scenarios deferred"}
+  - {file: tests/unit/dump.tcl,            status: excluded, reason: "RDB dump/restore not yet parity-tested"}
+  - {file: tests/unit/expire.tcl,          status: pass}
+  - {file: tests/unit/geo.tcl,             status: excluded, reason: "geo commands deferred; precision audit needed"}
+  - {file: tests/unit/hyperloglog.tcl,     status: excluded, reason: "HyperLogLog not yet implemented"}
+  - {file: tests/unit/introspection.tcl,   status: excluded, reason: "CLIENT family M11; file pass M12"}
+  - {file: tests/unit/iterator.tcl,        status: excluded, reason: "SCAN/cursor semantics differ; redisdb corpus covers"}
+  - {file: tests/unit/keyspace.tcl,        status: pass}
+  - {file: tests/unit/lazyfree.tcl,        status: excluded, reason: "lazyfree async semantics not yet implemented"}
+  - {file: tests/unit/maxmemory.tcl,       status: excluded, reason: "maxmemory eviction policy not yet implemented"}
+  - {file: tests/unit/memefficiency.tcl,   status: excluded, reason: "allocator-specific; not byte-diffable"}
+  - {file: tests/unit/networking.tcl,      status: excluded, reason: "CLIENT/CONN info; M11"}
+  - {file: tests/unit/notify.tcl,          status: excluded, reason: "keyspace notifications not yet implemented"}
+  - {file: tests/unit/oom-score-adj.tcl,   status: excluded, reason: "OS-specific cgroup tweak"}
+  - {file: tests/unit/other.tcl,           status: pass}
+  - {file: tests/unit/pause.tcl,           status: excluded, reason: "CLIENT PAUSE not yet implemented"}
+  - {file: tests/unit/protocol.tcl,        status: pass}
+  - {file: tests/unit/pubsub.tcl,          status: excluded, reason: "pub/sub multi-connection; harness limitation"}
+  - {file: tests/unit/scripting.tcl,       status: excluded, reason: "EVAL/SCRIPT land in M10"}
+  - {file: tests/unit/slowlog.tcl,         status: excluded, reason: "SLOWLOG not yet implemented"}
+  - {file: tests/unit/sort.tcl,            status: pass}
+  - {file: tests/unit/tls.tcl,             status: excluded, reason: "TLS not in scope"}
+
+  # -----------------------------------------------------------------------
+  # tests/integration/* (selected)
+  # -----------------------------------------------------------------------
+  - {file: tests/integration/convert-zipmap-hash-on-load.tcl, status: excluded, reason: "RDB load test; not applicable"}
+  - {file: tests/integration/redis-cli.tcl,                    status: excluded, reason: "redis-cli specific; out of scope"}
+  - {file: tests/integration/replication.tcl,                  status: excluded, reason: "replication tested via Go integration tests"}
+  - {file: tests/integration/replication-2.tcl,                status: excluded, reason: "replication tested via Go integration tests"}
+  - {file: tests/integration/replication-3.tcl,                status: excluded, reason: "replication tested via Go integration tests"}
+  - {file: tests/integration/replication-4.tcl,                status: excluded, reason: "replication tested via Go integration tests"}
+  - {file: tests/integration/replication-psync.tcl,            status: excluded, reason: "replication tested via Go integration tests"}
+  - {file: tests/integration/aof.tcl,                          status: excluded, reason: "AOF persistence tested via Go tests"}
+  - {file: tests/integration/rdb.tcl,                          status: excluded, reason: "RDB persistence tested via Go tests"}

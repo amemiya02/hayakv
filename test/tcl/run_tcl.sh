@@ -1,176 +1,164 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Productized TCL test runner for hayakv.
+# Clones the pinned redis/redis tag, builds hayakv, creates a redis-server shim,
+# and runs the upstream TCL test suite against hayakv via test_helper.tcl.
+#
+# Usage:
+#   bash test/tcl/run_tcl.sh                         # run all in-scope files
+#   bash test/tcl/run_tcl.sh tests/unit/type/string.tcl  # run one file
+#
+# Environment:
+#   REDIS_GIT_TAG   – redis/redis tag to check out (default: parsed from redisversion.go)
+#   REDIS_TCL_DIR   – path to an already-checked-out redis/tests dir (skip clone)
+#   TCL_SHIM_PORT   – port the shim server listens on (default: 6379)
 
-# TCL runner scaffold for hayakv
-# This script runs TCL tests against the hayakv server
+set -euo pipefail
 
-set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Configuration
-HAYAKV_PORT=${HAYAKV_PORT:-6379}
-HAYAKV_HOST=${HAYAKV_HOST:-127.0.0.1}
-TCL_TEST_DIR=${TCL_TEST_DIR:-./tests}
-TCL_SERVER=${TCL_SERVER:-redis-server}
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Function to print colored output
-print_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+# ---------------------------------------------------------------------------
+# Resolve the pinned redis git tag from redisversion.go
+# ---------------------------------------------------------------------------
+resolve_tag() {
+    grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$SCRIPT_DIR/redisversion.go" \
+        | head -1 | tr -d '"'
 }
 
-print_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
+REDIS_GIT_TAG="${REDIS_GIT_TAG:-$(resolve_tag)}"
+TCL_SHIM_PORT="${TCL_SHIM_PORT:-6379}"
 
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+# ---------------------------------------------------------------------------
+# Locate or clone redis tests
+# ---------------------------------------------------------------------------
+if [[ -n "${REDIS_TCL_DIR:-}" && -d "$REDIS_TCL_DIR" ]]; then
+    REDIS_TESTS_DIR="$REDIS_TCL_DIR"
+else
+    TMPDIR_ROOT="${TMPDIR:-/tmp}/hayakv-tcl"
+    mkdir -p "$TMPDIR_ROOT"
+    REDIS_SRC="$TMPDIR_ROOT/redis-$REDIS_GIT_TAG"
 
-# Function to check if server is running
-check_server() {
-    if redis-cli -h $HAYAKV_HOST -p $HAYAKV_PORT ping > /dev/null 2>&1; then
-        return 0
-    else
-        return 1
+    if [[ ! -d "$REDIS_SRC/tests" ]]; then
+        echo "[tcl] cloning redis/redis@$REDIS_GIT_TAG into $REDIS_SRC ..."
+        git clone --depth 1 --branch "$REDIS_GIT_TAG" \
+            https://github.com/redis/redis "$REDIS_SRC" 2>&1
     fi
+    REDIS_TESTS_DIR="$REDIS_SRC/tests"
+fi
+
+echo "[tcl] redis tests dir: $REDIS_TESTS_DIR"
+echo "[tcl] redis git tag:   $REDIS_GIT_TAG"
+
+# ---------------------------------------------------------------------------
+# Build hayakv binary
+# ---------------------------------------------------------------------------
+HAYAKV_BIN="$TMPDIR_ROOT/hayakv"
+echo "[tcl] building hayakv -> $HAYAKV_BIN ..."
+go build -o "$HAYAKV_BIN" "$REPO_ROOT/cmd/hayakv"
+
+# ---------------------------------------------------------------------------
+# Create redis-server shim that execs hayakv
+# ---------------------------------------------------------------------------
+SHIM_DIR="$TMPDIR_ROOT/shim"
+mkdir -p "$SHIM_DIR"
+cat > "$SHIM_DIR/redis-server" <<SHIM
+#!/usr/bin/env bash
+# Shim: the TCL suite invokes "redis-server [args...]"; we translate to hayakv.
+# hayakv accepts the same --port / --loglevel flags as redis-server.
+exec "$HAYAKV_BIN" "\$@"
+SHIM
+chmod +x "$SHIM_DIR/redis-server"
+
+# Also provide a redis-cli shim if the system doesn't have one.
+if ! command -v redis-cli &>/dev/null; then
+    cat > "$SHIM_DIR/redis-cli" <<'CLISHIM'
+#!/usr/bin/env bash
+# Minimal redis-cli shim: connect to localhost:$port and relay stdin/stdout.
+# Only handles the basic case the TCL suite needs (PING, SET, GET, etc.)
+exec socat - TCP:127.0.0.1:${1:-6379} 2>/dev/null || {
+    echo "redis-cli shim: socat not available" >&2
+    exit 1
 }
+CLISHIM
+    chmod +x "$SHIM_DIR/redis-cli"
+fi
 
-# Function to wait for server
-wait_for_server() {
-    local max_attempts=30
-    local attempt=1
+# Prepend shim dir so "redis-server" resolves to our hayakv wrapper.
+export PATH="$SHIM_DIR:$PATH"
 
-    print_info "Waiting for server at $HAYAKV_HOST:$HAYAKV_PORT..."
-
-    while [ $attempt -le $max_attempts ]; do
-        if check_server; then
-            print_info "Server is ready!"
-            return 0
+# ---------------------------------------------------------------------------
+# Determine which test files to run
+# ---------------------------------------------------------------------------
+if [[ $# -gt 0 ]]; then
+    # Explicit file list from the caller
+    TEST_FILES=("$@")
+else
+    # Default: run the in-scope files listed in manifest.yaml
+    TEST_FILES=()
+    while IFS= read -r line; do
+        # Extract file paths where status is "pass" or "partial"
+        file=$(echo "$line" | sed -n 's/.*file:\s*"\?\([^"]*\)"\?.*/\1/p')
+        status=$(echo "$line" | sed -n 's/.*status:\s*"\?\([^"]*\)"\?.*/\1/p')
+        if [[ -n "$file" && ("$status" == "pass" || "$status" == "partial") ]]; then
+            TEST_FILES+=("$file")
         fi
+    done < "$SCRIPT_DIR/manifest.yaml"
+fi
 
-        print_warn "Attempt $attempt/$max_attempts: Server not ready, waiting..."
-        sleep 1
-        attempt=$((attempt + 1))
-    done
+if [[ ${#TEST_FILES[@]} -eq 0 ]]; then
+    echo "[tcl] no in-scope test files found in manifest.yaml"
+    exit 0
+fi
 
-    print_error "Server did not become ready within $max_attempts seconds"
-    return 1
-}
+echo "[tcl] running ${#TEST_FILES[@]} test file(s) ..."
 
-# Function to run TCL tests
-run_tcl_tests() {
-    local test_file=$1
+# ---------------------------------------------------------------------------
+# Run each file through test_helper.tcl and collect results
+# ---------------------------------------------------------------------------
+PASS_COUNT=0
+FAIL_COUNT=0
+SKIP_COUNT=0
+SUMMARY_FILE="$TMPDIR_ROOT/summary.tsv"
+: > "$SUMMARY_FILE"
 
-    if [ ! -f "$test_file" ]; then
-        print_error "Test file not found: $test_file"
-        return 1
+for tf in "${TEST_FILES[@]}"; do
+    echo -n "[tcl] $tf ... "
+    LOG="$TMPDIR_ROOT/$(echo "$tf" | tr '/' '_').log"
+
+    if tclsh "$REDIS_TESTS_DIR/test_helper.tcl" \
+        --single "$tf" \
+        --port "$TCL_SHIM_PORT" \
+        > "$LOG" 2>&1; then
+        # Extract pass/fail counts from the log if available
+        passed=$(grep -oE 'passed [0-9]+' "$LOG" | tail -1 | grep -oE '[0-9]+' || echo "?")
+        failed=$(grep -oE 'failed [0-9]+' "$LOG" | tail -1 | grep -oE '[0-9]+' || echo "?")
+        echo "PASS (passed=$passed failed=$failed)"
+        printf "%s\t%s\t%s\t%s\n" "$tf" "pass" "$passed" "$failed" >> "$SUMMARY_FILE"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    else
+        passed=$(grep -oE 'passed [0-9]+' "$LOG" | tail -1 | grep -oE '[0-9]+' || echo "?")
+        failed=$(grep -oE 'failed [0-9]+' "$LOG" | tail -1 | grep -oE '[0-9]+' || echo "?")
+        echo "FAIL (passed=$passed failed=$failed)"
+        printf "%s\t%s\t%s\t%s\n" "$tf" "fail" "$passed" "$failed" >> "$SUMMARY_FILE"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
-
-    print_info "Running TCL tests from: $test_file"
-
-    # Run the TCL test
-    tclsh $test_file $HAYAKV_HOST $HAYAKV_PORT
-}
-
-# Function to show usage
-show_usage() {
-    echo "Usage: $0 [OPTIONS] [TEST_FILE]"
-    echo ""
-    echo "Options:"
-    echo "  -h, --help          Show this help message"
-    echo "  -p, --port PORT     Set server port (default: 6379)"
-    echo "  -H, --host HOST     Set server host (default: 127.0.0.1)"
-    echo "  -d, --dir DIR       Set test directory (default: ./tests)"
-    echo ""
-    echo "Examples:"
-    echo "  $0                          # Run all tests in ./tests"
-    echo "  $0 tests/object.tcl         # Run specific test file"
-    echo "  $0 -p 6380 tests/object.tcl # Run on different port"
-}
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -h|--help)
-            show_usage
-            exit 0
-            ;;
-        -p|--port)
-            HAYAKV_PORT="$2"
-            shift 2
-            ;;
-        -H|--host)
-            HAYAKV_HOST="$2"
-            shift 2
-            ;;
-        -d|--dir)
-            TCL_TEST_DIR="$2"
-            shift 2
-            ;;
-        *)
-            TEST_FILE="$1"
-            shift
-            ;;
-    esac
 done
 
-# Main execution
-print_info "Starting TCL test runner for hayakv"
-print_info "Server: $HAYAKV_HOST:$HAYAKV_PORT"
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+echo ""
+echo "========================================"
+echo " TCL Test Summary"
+echo "========================================"
+echo " Passed:  $PASS_COUNT"
+echo " Failed:  $FAIL_COUNT"
+echo " Total:   ${#TEST_FILES[@]}"
+echo "========================================"
+echo ""
+echo "Per-file results (file<TAB>status<TAB>passed<TAB>failed):"
+cat "$SUMMARY_FILE"
 
-# Check if server is running
-if ! check_server; then
-    print_error "Server is not running at $HAYAKV_HOST:$HAYAKV_PORT"
-    print_info "Please start the hayakv server first"
+if [[ $FAIL_COUNT -gt 0 ]]; then
     exit 1
 fi
-
-# Run tests
-if [ -n "$TEST_FILE" ]; then
-    # Run specific test file
-    run_tcl_tests "$TEST_FILE"
-else
-    # Run all tests in directory
-    if [ ! -d "$TCL_TEST_DIR" ]; then
-        print_warn "Test directory not found: $TCL_TEST_DIR"
-        print_info "Creating empty test directory..."
-        mkdir -p "$TCL_TEST_DIR"
-    fi
-
-    # Find and run all .tcl files
-    test_count=0
-    pass_count=0
-    fail_count=0
-
-    for test_file in "$TCL_TEST_DIR"/*.tcl; do
-        if [ -f "$test_file" ]; then
-            test_count=$((test_count + 1))
-            print_info "Running: $test_file"
-
-            if run_tcl_tests "$test_file"; then
-                pass_count=$((pass_count + 1))
-                print_info "PASSED: $test_file"
-            else
-                fail_count=$((fail_count + 1))
-                print_error "FAILED: $test_file"
-            fi
-        fi
-    done
-
-    # Print summary
-    echo ""
-    print_info "Test Summary:"
-    print_info "  Total:  $test_count"
-    print_info "  Passed: $pass_count"
-    print_info "  Failed: $fail_count"
-
-    if [ $fail_count -gt 0 ]; then
-        exit 1
-    fi
-fi
-
-print_info "TCL test runner completed"
