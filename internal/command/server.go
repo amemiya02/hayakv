@@ -409,16 +409,34 @@ func BGSaveRDB(db *Server, args [][]byte) redis.Reply {
 	if db.persister == nil {
 		return protocol.MakeErrReply("please enable aof before using save")
 	}
+	rdbFilename := config.Properties.RDBFilename
+	if rdbFilename == "" {
+		rdbFilename = "dump.rdb"
+	}
+	if config.Properties.RdbImpl == "faithful" {
+		// Take the consistent point-in-time snapshot ON the caller's goroutine
+		// (single-threaded => no key changes mid-copy), then encode in background.
+		snap := db.snapshotAllDBs()
+		dbCount := config.Properties.Databases
+		go func() {
+			defer func() {
+				if err := recover(); err != nil {
+					logger.Error(err)
+				}
+			}()
+			if err := db.saveSnapshotToFile(snap, dbCount, rdbFilename); err != nil {
+				logger.Error(err)
+			}
+		}()
+		return protocol.MakeStatusReply("Background saving started")
+	}
+	// library fallback (unchanged)
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
 				logger.Error(err)
 			}
 		}()
-		rdbFilename := config.Properties.RDBFilename
-		if rdbFilename == "" {
-			rdbFilename = "dump.rdb"
-		}
 		err := db.persister.GenerateRDB(rdbFilename)
 		if err != nil {
 			logger.Error(err)
