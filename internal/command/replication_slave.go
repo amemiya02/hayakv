@@ -238,7 +238,7 @@ func (server *Server) connectWithMaster(configVersion int32) (bool, error) {
 	}
 
 	// announce capacity
-	capaCmdLine := utils.ToCmdLine("REPLCONF", "capa", "psync2")
+	capaCmdLine := utils.ToCmdLine("REPLCONF", "capa", "eof", "capa", "psync2")
 	err = sendCmdToMaster(conn, capaCmdLine, masterChan)
 	if err != nil {
 		return false, err

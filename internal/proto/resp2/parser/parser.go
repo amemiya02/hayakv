@@ -153,7 +153,10 @@ func parseBulkString(header []byte, reader *bufio.Reader, ch chan<- *Payload) er
 	return nil
 }
 
-// there is no CRLF between RDB and following AOF, therefore it needs to be treated differently
+// there is no CRLF between RDB and following AOF, therefore it needs to be treated differently.
+// Two framings are supported:
+//   1. length-prefixed: $<len>\r\n<len bytes>            (disk-based full resync)
+//   2. EOF-marked:      $EOF:<40-byte-mark>\r\n<bytes><mark>  (diskless full resync)
 func parseRDBBulkString(reader *bufio.Reader, ch chan<- *Payload) error {
 	header, err := reader.ReadBytes('\n')
 	if err != nil {
@@ -162,6 +165,9 @@ func parseRDBBulkString(reader *bufio.Reader, ch chan<- *Payload) error {
 	header = bytes.TrimSuffix(header, []byte{'\r', '\n'})
 	if len(header) == 0 {
 		return errors.New("empty header")
+	}
+	if bytes.HasPrefix(header, []byte("$EOF:")) {
+		return parseRDBEOFMark(header[len("$EOF:"):], reader, ch)
 	}
 	strLen, err := strconv.ParseInt(string(header[1:]), 10, 64)
 	if err != nil || strLen <= 0 {
@@ -176,6 +182,33 @@ func parseRDBBulkString(reader *bufio.Reader, ch chan<- *Payload) error {
 		Data: protocol.MakeBulkReply(body[:len(body)]),
 	}
 	return nil
+}
+
+// parseRDBEOFMark reads a diskless RDB stream terminated by the given mark.
+// It reads byte-by-byte maintaining a trailing window equal to the mark length;
+// when the window equals the mark, the RDB body is everything before it.
+func parseRDBEOFMark(mark []byte, reader *bufio.Reader, ch chan<- *Payload) error {
+	if len(mark) == 0 {
+		return errors.New("empty EOF mark")
+	}
+	var body []byte
+	window := make([]byte, 0, len(mark))
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return err
+		}
+		window = append(window, b)
+		if len(window) > len(mark) {
+			// the byte sliding out of the window is part of the RDB body
+			body = append(body, window[0])
+			window = window[1:]
+		}
+		if len(window) == len(mark) && bytes.Equal(window, mark) {
+			ch <- &Payload{Data: protocol.MakeBulkReply(body)}
+			return nil
+		}
+	}
 }
 
 func parseArray(header []byte, reader *bufio.Reader, ch chan<- *Payload) error {

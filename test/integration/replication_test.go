@@ -179,6 +179,40 @@ func TestWaitOneReplica(t *testing.T) {
 	}
 }
 
+func TestDisklessFullResync(t *testing.T) {
+	// Master uses diskless replication.
+	masterAddr, stopMaster := startHayakvRepl(t, "repl-diskless-sync yes")
+	defer stopMaster()
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	// Seed multiple keys so the RDB is non-trivial before the replica attaches.
+	for i := 0; i < 50; i++ {
+		if err := master.Set(ctx, fmt.Sprintf("dk%d", i), fmt.Sprintf("dv%d", i), 0).Err(); err != nil {
+			t.Fatalf("seed SET: %v", err)
+		}
+	}
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	// All 50 seeded keys must arrive via the diskless RDB.
+	pollGet(t, replica, "dk0", "dv0", 15*time.Second)
+	pollGet(t, replica, "dk49", "dv49", 15*time.Second)
+
+	// And live propagation after the diskless full sync.
+	if err := master.Set(ctx, "live", "after", 0).Err(); err != nil {
+		t.Fatalf("live SET: %v", err)
+	}
+	pollGet(t, replica, "live", "after", 10*time.Second)
+}
+
 func TestWaitTimesOutWhenNotEnoughReplicas(t *testing.T) {
 	masterAddr, stopMaster := startHayakvRepl(t, "")
 	defer stopMaster()

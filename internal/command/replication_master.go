@@ -220,35 +220,62 @@ func (server *Server) masterFullReSyncWithSlave(slave *slaveClient) error {
 	if err != nil {
 		return fmt.Errorf("write replication header to slave failed: %v", err)
 	}
-	// send rdb
-	rdbFile, err := os.Open(server.masterStatus.rdbFilename)
-	if err != nil {
-		return fmt.Errorf("open rdb file %s for replication error: %v", server.masterStatus.rdbFilename, err)
-	}
 	slave.state = slaveStateSendingRDB
-	rdbInfo, _ := os.Stat(server.masterStatus.rdbFilename)
-	rdbSize := rdbInfo.Size()
-	rdbHeader := "$" + strconv.FormatInt(rdbSize, 10) + protocol.CRLF
-	_, err = slave.conn.Write([]byte(rdbHeader))
-	if err != nil {
-		return fmt.Errorf("write rdb header to slave failed: %v", err)
+	if config.Properties.ReplDisklessSync {
+		if err := server.masterDisklessSendRDB(slave); err != nil {
+			return err
+		}
+	} else {
+		if err := server.masterDiskSendRDB(slave); err != nil {
+			return err
+		}
 	}
-	_, err = io.Copy(slave.conn, rdbFile)
-	if err != nil {
-		return fmt.Errorf("write rdb file to slave failed: %v", err)
-	}
-
 	// send backlog
 	server.masterStatus.mu.RLock()
 	backlog, currentOffset := server.masterStatus.backlog.getSnapshot()
 	server.masterStatus.mu.RUnlock()
-	_, err = slave.conn.Write(backlog)
-	if err != nil {
+	if _, err = slave.conn.Write(backlog); err != nil {
 		return fmt.Errorf("full resync write backlog to slave failed: %v", err)
 	}
-
-	// set slave as online
 	server.setSlaveOnline(slave, currentOffset)
+	return nil
+}
+
+// masterDiskSendRDB writes the RDB as $<size>\r\n<bytes> from the temp file.
+func (server *Server) masterDiskSendRDB(slave *slaveClient) error {
+	rdbFile, err := os.Open(server.masterStatus.rdbFilename)
+	if err != nil {
+		return fmt.Errorf("open rdb file %s for replication error: %v", server.masterStatus.rdbFilename, err)
+	}
+	defer rdbFile.Close()
+	rdbInfo, _ := os.Stat(server.masterStatus.rdbFilename)
+	rdbHeader := "$" + strconv.FormatInt(rdbInfo.Size(), 10) + protocol.CRLF
+	if _, err = slave.conn.Write([]byte(rdbHeader)); err != nil {
+		return fmt.Errorf("write rdb header to slave failed: %v", err)
+	}
+	if _, err = io.Copy(slave.conn, rdbFile); err != nil {
+		return fmt.Errorf("write rdb file to slave failed: %v", err)
+	}
+	return nil
+}
+
+// masterDisklessSendRDB writes the RDB as $EOF:<mark>\r\n<bytes><mark>.
+func (server *Server) masterDisklessSendRDB(slave *slaveClient) error {
+	rdbFile, err := os.Open(server.masterStatus.rdbFilename)
+	if err != nil {
+		return fmt.Errorf("open rdb file %s for replication error: %v", server.masterStatus.rdbFilename, err)
+	}
+	defer rdbFile.Close()
+	mark := utils.RandHexString(40)
+	if _, err = slave.conn.Write([]byte("$EOF:" + mark + protocol.CRLF)); err != nil {
+		return fmt.Errorf("write diskless rdb header to slave failed: %v", err)
+	}
+	if _, err = io.Copy(slave.conn, rdbFile); err != nil {
+		return fmt.Errorf("write diskless rdb body to slave failed: %v", err)
+	}
+	if _, err = slave.conn.Write([]byte(mark)); err != nil {
+		return fmt.Errorf("write diskless rdb mark to slave failed: %v", err)
+	}
 	return nil
 }
 
