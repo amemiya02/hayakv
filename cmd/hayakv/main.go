@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 
 	"github.com/amemiya02/hayakv/config"
@@ -58,6 +59,7 @@ func main() {
 	} else {
 		config.SetupConfig(configFilename)
 	}
+	config.ApplyArgvOverrides(config.Properties, os.Args[1:])
 	listenAddr := fmt.Sprintf("%s:%d", config.Properties.Bind, config.Properties.Port)
 
 	server.NormalizeBackends(config.Properties)
@@ -109,6 +111,30 @@ func main() {
 
 	handler := stdserver.NewHandlerWithDB(engine, codec)
 	ctx := context.Background()
+
+	logger.Info("Ready to accept connections tcp")
+
+	// Start unix socket listener if configured.
+	if sock := config.Properties.UnixSocket; sock != "" {
+		go func() {
+			_ = os.Remove(sock) // remove stale socket file
+			ln, err := net.Listen("unix", sock)
+			if err != nil {
+				logger.Errorf("unix socket listen %s failed: %v", sock, err)
+				return
+			}
+			logger.Infof("Listening on unix socket %s", sock)
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					logger.Errorf("unix socket accept: %v", err)
+					return
+				}
+				go handler.Handle(ctx, conn)
+			}
+		}()
+	}
+
 	err = netServer.Run(ctx, listenAddr, handler)
 	if err != nil {
 		logger.Errorf("start server failed: %v", err)

@@ -97,6 +97,20 @@ func TestMemoryConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestArgvOverridesAndUnixSocket(t *testing.T) {
+	p := parse(strings.NewReader("port 6400\n"))
+	ApplyArgvOverrides(p, []string{"--port", "6401", "--unixsocket", "/tmp/h.sock", "--maxmemory", "100mb"})
+	if p.Port != 6401 {
+		t.Fatalf("argv --port not applied: %d", p.Port)
+	}
+	if p.UnixSocket != "/tmp/h.sock" {
+		t.Fatalf("unixsocket = %q", p.UnixSocket)
+	}
+	if p.Maxmemory != 100*1024*1024 {
+		t.Fatalf("maxmemory = %d, want %d", p.Maxmemory, 100*1024*1024)
+	}
+}
+
 func TestParseClusterMode(t *testing.T) {
 	p := parse(strings.NewReader("cluster-enable yes\ncluster-mode redis\ncluster-config-file nodes.conf\nport 7000\n"))
 	if !p.ClusterEnable {

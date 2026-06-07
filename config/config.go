@@ -50,6 +50,8 @@ type ServerProperties struct {
 	EngineBackend string `cfg:"engine"`
 	ProtoMax      string `cfg:"proto-max"`
 
+	UnixSocket string `cfg:"unixsocket"`
+
 	SlowLogSlowerThan int64 `cfg:"slowlog-log-slower-than"`
 	SlowLogMaxLen     int   `cfg:"slowlog-max-len"`
 
@@ -191,29 +193,7 @@ func parse(src io.Reader) *ServerProperties {
 		}
 		value, ok := rawMap[strings.ToLower(key)]
 		if ok {
-			// fill config
-			switch field.Type.Kind() {
-			case reflect.String:
-				fieldVal.SetString(value)
-			case reflect.Int:
-				intValue, err := strconv.ParseInt(value, 10, 64)
-				if err == nil {
-					fieldVal.SetInt(intValue)
-				}
-			case reflect.Int64:
-				intValue, err := strconv.ParseInt(value, 10, 64)
-				if err == nil {
-					fieldVal.SetInt(intValue)
-				}
-			case reflect.Bool:
-				boolValue := "yes" == value
-				fieldVal.SetBool(boolValue)
-			case reflect.Slice:
-				if field.Type.Elem().Kind() == reflect.String {
-					slice := strings.Split(value, ",")
-					fieldVal.Set(reflect.ValueOf(slice))
-				}
-			}
+			setFieldByType(fieldVal, field.Type, value)
 		}
 	}
 	config.rawConfig = rawMap
@@ -305,4 +285,70 @@ func (p *ServerProperties) rawMaxmemory() (string, bool) {
 	}
 	v, ok := p.rawConfig["maxmemory"]
 	return v, ok
+}
+
+// setFieldByType applies a string value to a reflected struct field based on its kind.
+// It mirrors the type-switch logic formerly inlined in parse().
+func setFieldByType(fieldVal reflect.Value, fieldType reflect.Type, value string) {
+	switch fieldType.Kind() {
+	case reflect.String:
+		fieldVal.SetString(value)
+	case reflect.Int, reflect.Int64:
+		intValue, err := strconv.ParseInt(value, 10, 64)
+		if err == nil {
+			fieldVal.SetInt(intValue)
+		}
+	case reflect.Bool:
+		boolValue := "yes" == value
+		fieldVal.SetBool(boolValue)
+	case reflect.Slice:
+		if fieldType.Elem().Kind() == reflect.String {
+			slice := strings.Split(value, ",")
+			fieldVal.Set(reflect.ValueOf(slice))
+		}
+	}
+}
+
+// setFieldByCfgTag looks up a ServerProperties field by its cfg tag key
+// and applies the given value using setFieldByType. Returns true if the
+// field was found and set.
+func setFieldByCfgTag(cfg *ServerProperties, key, value string) bool {
+	t := reflect.TypeOf(cfg).Elem()
+	v := reflect.ValueOf(cfg).Elem()
+	n := t.NumField()
+	lowerKey := strings.ToLower(key)
+	for i := 0; i < n; i++ {
+		field := t.Field(i)
+		tag, ok := field.Tag.Lookup("cfg")
+		if !ok || strings.TrimSpace(tag) == "" {
+			tag = field.Name
+		}
+		if strings.ToLower(tag) == lowerKey {
+			setFieldByType(v.Field(i), field.Type, value)
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyArgvOverrides processes "--key value" pairs from os.Args-style argv
+// and applies them over the current config. It also re-normalizes memory
+// configuration so that unit-suffixed maxmemory values (e.g. "100mb") are
+// parsed correctly.
+func ApplyArgvOverrides(cfg *ServerProperties, argv []string) {
+	for i := 0; i < len(argv)-1; i++ {
+		arg := argv[i]
+		if strings.HasPrefix(arg, "--") {
+			key := strings.TrimPrefix(arg, "--")
+			value := argv[i+1]
+			setFieldByCfgTag(cfg, key, value)
+			// also record in rawConfig so normalizeMemoryConfig picks up unit suffixes
+			if cfg.rawConfig == nil {
+				cfg.rawConfig = make(map[string]string)
+			}
+			cfg.rawConfig[strings.ToLower(key)] = value
+			i++ // skip value
+		}
+	}
+	normalizeMemoryConfig(cfg)
 }
