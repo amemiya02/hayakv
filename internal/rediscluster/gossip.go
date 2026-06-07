@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -378,14 +379,17 @@ func (g *gossipBus) pingLoop() {
 
 func (g *gossipBus) pingOnePeer() {
 	g.state.mu.RLock()
-	var target *clusterNode
+	var peers []*clusterNode
 	for _, n := range g.state.nodes {
 		if n.id != g.state.self.id && n.cport != 0 {
-			target = n
-			break
+			peers = append(peers, n)
 		}
 	}
 	g.state.mu.RUnlock()
+	if len(peers) == 0 {
+		return
+	}
+	target := peers[rand.Intn(len(peers))]
 	if target == nil {
 		return
 	}

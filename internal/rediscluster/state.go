@@ -3,6 +3,7 @@ package rediscluster
 import (
 	"bufio"
 	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -31,10 +32,16 @@ type clusterState struct {
 func newClusterState(ip string, port int, confPath string) *clusterState {
 	self := newNode(genNodeID(), ip, port)
 	self.flags |= flagMyself
+	// Start each node with a random epoch offset so that independent
+	// ADDSLOTS calls on different nodes produce distinct configEpochs.
+	// Without this, all nodes bump from 0→1 and gossip cannot adopt
+	// slots (1 >= 1 blocks the merge).
+	startEpoch := uint64(rand.Int63n(1000)) + 1
 	return &clusterState{
 		self:       self,
 		nodes:      map[string]*clusterNode{self.id: self},
 		migrations: map[uint16]*migration{},
+		epoch:      startEpoch,
 		confPath:   confPath,
 	}
 }

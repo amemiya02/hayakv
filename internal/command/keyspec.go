@@ -37,7 +37,7 @@ func ExtractKeys(cmdLine [][]byte) [][]byte {
 	}
 	last := spec.LastKey
 	if last < 0 {
-		last = len(cmdLine) - 1 + last // e.g. -1 => last arg index
+		last = len(cmdLine) + last // e.g. -1 => last arg index
 	}
 	var keys [][]byte
 	for i := spec.FirstKey; i <= last && i < len(cmdLine); i += spec.KeyStep {

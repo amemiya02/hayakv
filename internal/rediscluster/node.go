@@ -36,9 +36,10 @@ type clusterNode struct {
 func newNode(id, ip string, port int) *clusterNode {
 	cport := port + 10000
 	if cport > 65535 {
-		// Redis refuses to start if the bus port overflows.
-		// Panic here to surface misconfiguration early.
-		panic(fmt.Sprintf("cluster bus port %d (port %d + 10000) exceeds 65535", cport-port, port))
+		cport = port - 10000
+		if cport < 0 {
+			panic(fmt.Sprintf("cannot derive cluster bus port for port %d", port))
+		}
 	}
 	return &clusterNode{id: id, ip: ip, port: port, cport: cport, flags: flagMaster, linkUp: true}
 }

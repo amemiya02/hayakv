@@ -853,9 +853,9 @@ func init() {
 	registerCommand("MSet", execMSet, prepareMSet, undoMSet, -3, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM}, 1, -1, 2)
 	registerCommand("MGet", execMGet, prepareMGet, nil, -2, flagReadOnly).
-		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, -1, 1)
 	registerCommand("MSetNX", execMSetNX, prepareMSet, undoMSet, -3, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM}, 1, -1, 2)
 	registerCommand("Get", execGet, readFirstKey, nil, 2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("GetEX", execGetEX, writeFirstKey, rollbackFirstKey, -2, flagReadOnly).

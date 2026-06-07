@@ -176,8 +176,14 @@ func TestClusterThreeNodeMeetAndSlots(t *testing.T) {
 
 	// --- MEET: node1 meets node2, node1 meets node3 ---
 	// CLUSTER MEET <ip> <port> [<cport>]
-	cport2 := port2 + 10000
-	cport3 := port3 + 10000
+	cportFor := func(p int) int {
+		if p+10000 <= 65535 {
+			return p + 10000
+		}
+		return p - 10000
+	}
+	cport2 := cportFor(port2)
+	cport3 := cportFor(port3)
 	r := sendCmd(t, addr1, "CLUSTER", "MEET", "127.0.0.1", fmt.Sprintf("%d", port2), fmt.Sprintf("%d", cport2))
 	if !strings.Contains(r, "+OK") {
 		t.Fatalf("MEET node2: %q", r)
@@ -213,7 +219,25 @@ func TestClusterThreeNodeMeetAndSlots(t *testing.T) {
 		t.Fatalf("ADDSLOTSRANGE node3: %q", r)
 	}
 
-	// --- Verify CLUSTER INFO shows cluster_state:ok on node1 ---
+	// --- Wait for gossip to propagate slot ownership across all nodes ---
+	allAddrs := []string{addr1, addr2, addr3}
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		allOK := true
+		for _, addr := range allAddrs {
+			info := sendCmd(t, addr, "CLUSTER", "INFO")
+			if !strings.Contains(info, "cluster_state:ok") {
+				allOK = false
+				break
+			}
+		}
+		if allOK {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// --- Verify each node sees cluster_state:ok ---
 	info := sendCmd(t, addr1, "CLUSTER", "INFO")
 	if !strings.Contains(info, "cluster_state:ok") {
 		t.Fatalf("cluster not ok after full slot assignment:\n%s", info)
@@ -225,8 +249,7 @@ func TestClusterThreeNodeMeetAndSlots(t *testing.T) {
 		t.Fatalf("expected cluster_size 3:\n%s", info)
 	}
 
-	// --- Verify each node sees 16384 assigned slots ---
-	for i, addr := range []string{addr1, addr2, addr3} {
+	for i, addr := range allAddrs {
 		nodeInfo := sendCmd(t, addr, "CLUSTER", "INFO")
 		if !strings.Contains(nodeInfo, "cluster_state:ok") {
 			t.Fatalf("node%d cluster not ok:\n%s", i+1, nodeInfo)
@@ -280,8 +303,14 @@ func TestClusterThreeNodeKeyRouting(t *testing.T) {
 	defer stop3()
 
 	// MEET
-	cport2 := port2 + 10000
-	cport3 := port3 + 10000
+	cportFor := func(p int) int {
+		if p+10000 <= 65535 {
+			return p + 10000
+		}
+		return p - 10000
+	}
+	cport2 := cportFor(port2)
+	cport3 := cportFor(port3)
 	sendCmd(t, addr1, "CLUSTER", "MEET", "127.0.0.1", fmt.Sprintf("%d", port2), fmt.Sprintf("%d", cport2))
 	sendCmd(t, addr1, "CLUSTER", "MEET", "127.0.0.1", fmt.Sprintf("%d", port3), fmt.Sprintf("%d", cport3))
 
@@ -299,6 +328,24 @@ func TestClusterThreeNodeKeyRouting(t *testing.T) {
 	sendCmd(t, addr1, "CLUSTER", "ADDSLOTSRANGE", "0", "5460")
 	sendCmd(t, addr2, "CLUSTER", "ADDSLOTSRANGE", "5461", "10922")
 	sendCmd(t, addr3, "CLUSTER", "ADDSLOTSRANGE", "10923", "16383")
+
+	// Wait for gossip to propagate slot ownership across all nodes
+	allAddrs := []string{addr1, addr2, addr3}
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		allOK := true
+		for _, addr := range allAddrs {
+			info := sendCmd(t, addr, "CLUSTER", "INFO")
+			if !strings.Contains(info, "cluster_state:ok") {
+				allOK = false
+				break
+			}
+		}
+		if allOK {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// "foo" hashes to slot 12182 -> node3 (10923-16383)
 	// SET on node1 (wrong owner) should return MOVED
