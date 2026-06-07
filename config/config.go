@@ -30,6 +30,7 @@ type ServerProperties struct {
 	AnnounceHost      string `cfg:"announce-host"`
 	AppendOnly        bool   `cfg:"appendonly"`
 	AppendFilename    string `cfg:"appendfilename"`
+	AppendDirname     string `cfg:"appenddirname"` // multi-part AOF directory (Redis 7+)
 	AppendFsync       string `cfg:"appendfsync"`
 	AofUseRdbPreamble bool   `cfg:"aof-use-rdb-preamble"`
 	MaxClients        int    `cfg:"maxclients"`
@@ -128,6 +129,8 @@ func init() {
 		EngineBackend: "shardmap",
 		ProtoMax:      "resp2",
 		RdbImpl:       "library",
+		AppendFilename: "appendonly.aof",
+		AppendDirname:  "appendonlydir",
 
 		ReplBacklogSize:  1024 * 1024, // 1MB, Redis default
 		ReplDisklessSync: false,
