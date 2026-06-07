@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,4 +107,43 @@ func splitAddr(t *testing.T, addr string) (host, port string) {
 	}
 	t.Fatalf("bad addr %q", addr)
 	return "", ""
+}
+
+func TestReplconfGetackUpdatesMasterView(t *testing.T) {
+	masterAddr, stopMaster := startHayakvRepl(t, "")
+	defer stopMaster()
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	// Let the replica attach and go online.
+	if err := master.Set(ctx, "warm", "up", 0).Err(); err != nil {
+		t.Fatalf("SET warm: %v", err)
+	}
+	pollGet(t, replica, "warm", "up", 10*time.Second)
+
+	// Write more, then poll INFO replication on the master until a slave0 line
+	// reports a positive offset (proves GETACK/ACK flow updates the master view).
+	for i := 0; i < 20; i++ {
+		_ = master.Set(ctx, fmt.Sprintf("k%d", i), "v", 0).Err()
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		info := master.Info(ctx, "replication").Val()
+		if strings.Contains(info, "slave0:") && strings.Contains(info, "state=online") &&
+			!strings.Contains(info, "offset=0,") {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("master never saw a slave0 with non-zero offset:\n%s", master.Info(ctx, "replication").Val())
 }

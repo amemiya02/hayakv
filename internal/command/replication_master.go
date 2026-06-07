@@ -419,6 +419,25 @@ func (server *Server) setSlaveOnline(slave *slaveClient, currentOffset int64) {
 
 var pingBytes = protocol.MakeMultiBulkReply(utils.ToCmdLine("ping")).ToBytes()
 
+var getackBytes = protocol.MakeMultiBulkReply(utils.ToCmdLine("REPLCONF", "GETACK", "*")).ToBytes()
+
+// getAckFromSlaves appends REPLCONF GETACK * to the backlog and pushes it to
+// online slaves so they reply with their current offset. Loop callers (WAIT)
+// then poll slaveClient.offset.
+func (server *Server) getAckFromSlaves() {
+	server.masterStatus.mu.Lock()
+	hasSlaves := len(server.masterStatus.onlineSlaves) > 0
+	if hasSlaves && server.masterStatus.bgSaveState == bgSaveFinish {
+		server.masterStatus.backlog.appendBytes(getackBytes)
+	}
+	server.masterStatus.mu.Unlock()
+	if hasSlaves {
+		if err := server.masterSendUpdatesToSlave(); err != nil {
+			logger.Errorf("getAckFromSlaves send error: %v", err)
+		}
+	}
+}
+
 // backlogRewriteFactor: trigger an RDB rewrite once the live keyspace AOF has
 // grown well past the backlog window, to keep partial-resync useful. The
 // backlog buffer itself is bounded by repl-backlog-size via appendBytes.

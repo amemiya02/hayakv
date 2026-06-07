@@ -402,11 +402,28 @@ func (server *Server) receiveAOF(ctx context.Context, configVersion int32) error
 			}
 			server.slaveStatus.mutex.Lock()
 			if server.slaveStatus.configVersion != configVersion {
-				// slaveStatus conf changed during connecting and waiting mutex
+				server.slaveStatus.mutex.Unlock()
 				return configChangedErr
 			}
+			// Count bytes consumed from the master stream BEFORE acting, so the
+			// offset reflects everything received (GETACK included).
+			n := len(cmdLine.ToBytes())
+			isGetAck := len(cmdLine.Args) >= 2 &&
+				strings.ToLower(string(cmdLine.Args[0])) == "replconf" &&
+				strings.ToLower(string(cmdLine.Args[1])) == "getack"
+			if isGetAck {
+				server.slaveStatus.replOffset += int64(n)
+				server.slaveStatus.lastRecvTime = time.Now()
+				offset := server.slaveStatus.replOffset
+				server.slaveStatus.mutex.Unlock()
+				ack := protocol.MakeMultiBulkReply(
+					utils.ToCmdLine("REPLCONF", "ACK", strconv.FormatInt(offset, 10)))
+				if _, err := server.slaveStatus.masterConn.Write(ack.ToBytes()); err != nil {
+					return errors.New("send ack failed " + err.Error())
+				}
+				continue
+			}
 			server.Exec(conn, cmdLine.Args)
-			n := len(cmdLine.ToBytes()) // todo: directly get size from socket
 			server.slaveStatus.replOffset += int64(n)
 			server.slaveStatus.lastRecvTime = time.Now()
 			logger.Info(fmt.Sprintf("receive %d bytes from master, current offset %d, %s",
