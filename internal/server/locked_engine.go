@@ -20,6 +20,12 @@ func NewLockedEngine(inner iface.StorageEngine) iface.StorageEngine {
 	return &lockedEngine{inner: inner}
 }
 
+// Inner returns the wrapped engine so callers can unwrap to the concrete type
+// (e.g. *database.Server) when needed for keyspace introspection wiring.
+func (le *lockedEngine) Inner() iface.StorageEngine {
+	return le.inner
+}
+
 func (le *lockedEngine) Exec(client redis.Connection, cmdLine iface.CmdLine) redis.Reply {
 	le.mu.Lock()
 	defer le.mu.Unlock()

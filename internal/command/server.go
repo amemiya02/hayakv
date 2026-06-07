@@ -6,6 +6,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -45,11 +46,17 @@ type Server struct {
 	// serverCronDone signals the serverCron goroutine to stop on Close().
 	serverCronDone chan struct{}
 
-	// disableCron prevents startServerCron from launching (eventloop backend).
+	// disableCron prevents StartCron from launching (eventloop backend).
 	disableCron bool
+
+	// memMu serialises the entire denyoom path (pre-check → execute →
+	// post-check/rollback) across all goroutines.  maxmemory is a global
+	// constraint — concurrent denyoom writes on different keys must not
+	// both pass the pre-check and then interfere in post-check.
+	memMu sync.Mutex
 }
 
-// DisableCron prevents startServerCron from launching a background goroutine.
+// DisableCron prevents StartCron from launching a background goroutine.
 // Called when the eventloop net backend is active (single-threaded command execution).
 func (server *Server) DisableCron() { server.disableCron = true }
 
@@ -101,13 +108,9 @@ func NewStandaloneServer() *Server {
 	server.slaveStatus = initReplSlaveStatus()
 	server.initMasterStatus()
 	server.startReplCron()
-	// M5: startServerCron is called only for goroutine backend.
-	// For eventloop, active-expire should be invoked inline from the loop tick.
-	// The caller (NewStorageEngine/NewNetServerWithEngine) sets server.disableCron
-	// before reaching here if the eventloop backend is active.
-	if !server.disableCron {
-		server.startServerCron()
-	}
+	// M5: StartCron is NOT started here. The goroutine backend calls
+	// server.StartCron() explicitly after construction. The eventloop backend
+	// never starts it (active-expire runs inline from the loop tick).
 	server.role = masterRole // The initialization process does not require atomicity
 
 	// record slow log
@@ -306,7 +309,7 @@ func (server *Server) loadDB(dbIndex int, newDB *DB) redis.Reply {
 	oldDB := server.mustSelectDB(dbIndex)
 	newDB.index = dbIndex
 	newDB.server = server
-	newDB.addAof = oldDB.addAof // inherit oldDB
+	newDB.persister = oldDB.persister // inherit oldDB
 	server.dbSet[dbIndex].Store(newDB)
 	return &protocol.OkReply{}
 }
@@ -484,10 +487,10 @@ func (server *Server) startReplCron() {
 	}(server)
 }
 
-// startServerCron runs the hz-driven background cron: active expiration across
+// StartCron runs the hz-driven background cron: active expiration across
 // all databases. Separate from the 10s startReplCron. Mirrors Redis serverCron's
 // databasesCron -> activeExpireCycle.
-func (server *Server) startServerCron() {
+func (server *Server) StartCron() {
 	server.serverCronDone = make(chan struct{})
 	go func(mdb *Server, done <-chan struct{}) {
 		ticker := time.NewTicker(serverCronPeriod())

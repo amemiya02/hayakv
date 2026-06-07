@@ -2,9 +2,12 @@
 package database
 
 import (
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/datastruct/dict"
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
@@ -19,6 +22,32 @@ const (
 	ttlDictSize  = 1 << 10
 )
 
+// aofBuffers is per-command storage for deferred AOF buffering, keyed by
+// goroutine ID.  A DenyOOM command stores its buffer here before the
+// executor runs; addAof checks it on every call so the executor's AOF
+// writes are captured without swapping any shared function-pointer field
+// (which would race with concurrent commands on other keys / MULTI /
+// active-expire).  Safe for concurrent access: each goroutine only writes
+// its own entry; Load is lock-free in the common (non-buffering) path.
+var aofBuffers sync.Map // int (goid) → *[]CmdLine
+
+// goid returns the current goroutine's ID by parsing the runtime stack.
+// ~150 ns; only called from the AOF write path (every command) so the
+// cost is negligible compared to the I/O it gates.
+func goid() int {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	// "goroutine 123 [..."
+	var id int
+	for i := 10; i < n; i++ {
+		if buf[i] < '0' || buf[i] > '9' {
+			break
+		}
+		id = id*10 + int(buf[i]-'0')
+	}
+	return id
+}
+
 // DB stores data and execute user's commands
 type DB struct {
 	index int
@@ -31,8 +60,10 @@ type DB struct {
 	// key -> lruMeta (approximate LRU clock OR LFU counter, per maxmemory-policy)
 	lruMap *dict.ConcurrentDict
 
-	// addaof is used to add command to aof
-	addAof func(CmdLine)
+	// persister is the real AOF handler (set by bindPersister).
+	// Never swapped at runtime — the addAof method wraps it with
+	// per-command buffering when needed.
+	persister func(CmdLine)
 
 	// callbacks
 	insertCallback database.KeyEventCallback
@@ -40,6 +71,21 @@ type DB struct {
 
 	// owning server (for cross-db memory accounting / eviction)
 	server *Server
+}
+
+// addAof is the single entry-point for all AOF writes.
+// If a DenyOOM command is buffering on this goroutine, the write goes into
+// that buffer; otherwise it goes directly to the persister.
+// Because it is a method (not a swappable field), no lock is needed and
+// MULTI / active-expire / normal commands all share the same safe path.
+func (db *DB) addAof(line CmdLine) {
+	if buf, ok := aofBuffers.Load(goid()); ok {
+		*buf.(*[]CmdLine) = append(*buf.(*[]CmdLine), line)
+		return
+	}
+	if db.persister != nil {
+		db.persister(line)
+	}
 }
 
 // ExecFunc is interface for command executor
@@ -64,7 +110,6 @@ func makeDB() *DB {
 		ttlMap:     dict.MakeConcurrent(ttlDictSize),
 		versionMap: dict.MakeConcurrent(dataDictSize),
 		lruMap:     dict.MakeConcurrent(dataDictSize),
-		addAof:     func(line CmdLine) {},
 	}
 	return db
 }
@@ -76,7 +121,6 @@ func makeBasicDB() *DB {
 		ttlMap:     dict.MakeConcurrent(ttlDictSize),
 		versionMap: dict.MakeConcurrent(dataDictSize),
 		lruMap:     dict.MakeConcurrent(dataDictSize),
-		addAof:     func(line CmdLine) {},
 	}
 	return db
 }
@@ -123,22 +167,128 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 		return protocol.MakeArgNumErrReply(cmdName)
 	}
 
-	// M5: enforce maxmemory for denyoom (allocating) commands.
-	if isDenyOOM(cmd) && evictionEnabledOrLimited() {
-		if db.server != nil && !db.server.freeMemoryIfNeeded() {
-			return oomErrReply()
-		}
-	}
-
 	prepare := cmd.prepare
 	write, read := prepare(cmdLine[1:])
-	db.addVersion(write...)
+
+	// --- M5 denyoom path (global memory critical section) ---
+	// maxmemory is a server-wide constraint.  memMu serialises the entire
+	// pre-check → execute → post-check/rollback sequence so that concurrent
+	// denyoom writes on different keys cannot both pass the pre-check and
+	// then interfere in post-check.
+	type keySnapshot struct {
+		entity     *database.DataEntity
+		expiry     time.Time
+		existed    bool
+		oldVersion uint32
+		oldLRU     lruMeta
+		hasLRU     bool
+	}
+	isDenyOOMCmd := isDenyOOM(cmd) && db.server != nil &&
+		config.Properties.Maxmemory > 0 &&
+		config.Properties.MaxmemoryPolicy == "noeviction"
+
+	if isDenyOOMCmd {
+		db.server.memMu.Lock()
+		defer db.server.memMu.Unlock()
+
+		// Pre-check: evict if possible, reject if still over limit.
+		if !db.server.freeMemoryIfNeeded() {
+			return oomErrReply()
+		}
+
+		// Lock keys BEFORE snapshot so no other writer can interleave.
+		db.RWLocks(write, read)
+		defer db.RWUnLocks(write, read)
+
+		// Snapshot under key lock — reads are safe.
+		var snaps map[string]keySnapshot
+		if len(write) > 0 {
+			snaps = make(map[string]keySnapshot, len(write))
+			for _, k := range write {
+				s := keySnapshot{oldVersion: db.GetVersion(k)}
+				if raw, ok := db.data.GetWithLock(k); ok {
+					s.entity = raw.(*database.DataEntity)
+					s.existed = true
+				}
+				if raw, ok := db.ttlMap.Get(k); ok {
+					s.expiry = raw.(time.Time)
+				}
+				if raw, ok := db.lruMap.Get(k); ok {
+					s.oldLRU = raw.(lruMeta)
+					s.hasLRU = true
+				}
+				snaps[k] = s
+			}
+		}
+
+		// Bump versions AFTER snapshot — snapshot captures the pre-bump
+		// value so OOM rollback can restore it (WATCH must not see a
+		// spurious change for a command that never took effect).
+		db.addVersion(write...)
+
+		// Buffer AOF writes so they can be discarded on rollback.
+		var aofBuf []CmdLine
+		if len(write) > 0 {
+			gid := goid()
+			aofBuffers.Store(gid, &aofBuf)
+			defer func() { aofBuffers.Delete(gid) }()
+		}
+
+		result := cmd.executor(db, cmdLine[1:])
+
+		// Post-write check: rollback if still over limit.
+		if db.server.usedMemory() > config.Properties.Maxmemory {
+			for _, k := range write {
+				s := snaps[k]
+				if s.existed {
+					db.data.PutWithLock(k, s.entity)
+					if s.expiry.IsZero() {
+						db.ttlMap.Remove(k)
+					} else {
+						db.ttlMap.Put(k, s.expiry)
+						db.Expire(k, s.expiry)
+					}
+				} else {
+					db.data.RemoveWithLock(k)
+					db.ttlMap.Remove(k)
+				}
+				if s.hasLRU {
+					db.lruMap.Put(k, s.oldLRU)
+				} else {
+					db.lruMap.Remove(k)
+				}
+				if s.existed {
+					db.versionMap.Put(k, s.oldVersion)
+				} else {
+					db.removeVersion(k)
+				}
+			}
+			return oomErrReply()
+		}
+
+		// Success: flush buffered AOF to persister.
+		if len(aofBuf) > 0 {
+			aofBuffers.Delete(goid())
+			for _, line := range aofBuf {
+				db.addAof(line)
+			}
+		}
+
+		if c != nil && c.Protocol() == redis.RESP3 && cmdName == "hgetall" {
+			if mbr, ok := result.(*protocol.MultiBulkReply); ok {
+				return convertMultiBulkToMapReply(mbr)
+			}
+		}
+		return result
+	}
+
+	// --- Non-denyoom path (no global lock needed) ---
 	db.RWLocks(write, read)
 	defer db.RWUnLocks(write, read)
-	fun := cmd.executor
-	result := fun(db, cmdLine[1:])
+	db.addVersion(write...)
 
-	// RESP3: convert HGETALL array reply to map
+	result := cmd.executor(db, cmdLine[1:])
+
 	if c != nil && c.Protocol() == redis.RESP3 && cmdName == "hgetall" {
 		if mbr, ok := result.(*protocol.MultiBulkReply); ok {
 			return convertMultiBulkToMapReply(mbr)
@@ -347,6 +497,12 @@ func (db *DB) addVersion(keys ...string) {
 		versionCode := db.GetVersion(key)
 		db.versionMap.Put(key, versionCode+1)
 	}
+}
+
+// removeVersion deletes the version entry for key (used during OOM rollback
+// for keys that did not exist before the failed command).
+func (db *DB) removeVersion(key string) {
+	db.versionMap.Remove(key)
 }
 
 // GetVersion returns version code for given key

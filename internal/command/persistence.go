@@ -112,7 +112,7 @@ func (server *Server) bindPersister(persister *aof.Persister) {
 	// bind SaveCmdLine
 	for _, db := range server.dbSet {
 		singleDB := db.Load().(*DB)
-		singleDB.addAof = func(line CmdLine) {
+		singleDB.persister = func(line CmdLine) {
 			if config.Properties.AppendOnly { // config may be changed during runtime
 				server.persister.SaveCmdLine(singleDB.index, line)
 			}

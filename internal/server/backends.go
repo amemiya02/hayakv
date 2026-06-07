@@ -48,17 +48,27 @@ func NewStorageEngine(cfg *config.ServerProperties) (iface.StorageEngine, error)
 	switch cfg.EngineBackend {
 	case EngineShardMap:
 		dict.SetEngine("shardmap")
-		return database.NewStandaloneServer(), nil
+		inner := database.NewStandaloneServer()
+		if cfg.NetBackend == NetGoroutine {
+			inner.StartCron()
+		}
+		return inner, nil
 	case EngineRedisDB:
 		dict.SetEngine("redisdb")
 		inner := database.NewStandaloneServer()
 		// For goroutine backend, wrap with a global lock since
 		// redisdb uses a single non-sharded dict.
 		if cfg.NetBackend == NetGoroutine {
+			// Start the background cron goroutine. It takes the lockedEngine
+			// global lock on each tick (via Exec), so it is safe alongside
+			// concurrent client goroutines.
+			inner.StartCron()
 			return NewLockedEngine(inner), nil
 		}
 		// For eventloop, locking is external and serverCron must not run as a
 		// background goroutine (it would race the single loop goroutine).
+		// DisableCron is a no-op now (NewStandaloneServer no longer starts it)
+		// but kept as an explicit guard.
 		inner.DisableCron()
 		return inner, nil
 	default:
@@ -129,7 +139,12 @@ func MaybeWrapCluster(cfg *config.ServerProperties, engine iface.StorageEngine) 
 		return nil, err
 	}
 	// Wire real keyspace introspection for CLUSTER COUNTKEYSINSLOT/GETKEYSINSLOT.
-	if srv, ok := engine.(*database.Server); ok {
+	// Unwrap lockedEngine (redisdb+goroutine path) to reach *database.Server.
+	eng := engine
+	if le, ok := engine.(interface{ Inner() iface.StorageEngine }); ok {
+		eng = le.Inner()
+	}
+	if srv, ok := eng.(*database.Server); ok {
 		ce.SetKeysInSlot(func(slot uint16, count int) []string {
 			var keys []string
 			srv.ForEach(0, func(key string, _ *ifaceDB.DataEntity, _ *time.Time) bool {
