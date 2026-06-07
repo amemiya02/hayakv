@@ -28,6 +28,8 @@ type DB struct {
 	ttlMap *dict.ConcurrentDict
 	// key -> version(uint32)
 	versionMap *dict.ConcurrentDict
+	// key -> lruMeta (approximate LRU clock OR LFU counter, per maxmemory-policy)
+	lruMap *dict.ConcurrentDict
 
 	// addaof is used to add command to aof
 	addAof func(CmdLine)
@@ -58,6 +60,7 @@ func makeDB() *DB {
 		data:       dict.MakeDict(),
 		ttlMap:     dict.MakeConcurrent(ttlDictSize),
 		versionMap: dict.MakeConcurrent(dataDictSize),
+		lruMap:     dict.MakeConcurrent(dataDictSize),
 		addAof:     func(line CmdLine) {},
 	}
 	return db
@@ -69,6 +72,7 @@ func makeBasicDB() *DB {
 		data:       dict.MakeConcurrent(dataDictSize),
 		ttlMap:     dict.MakeConcurrent(ttlDictSize),
 		versionMap: dict.MakeConcurrent(dataDictSize),
+		lruMap:     dict.MakeConcurrent(dataDictSize),
 		addAof:     func(line CmdLine) {},
 	}
 	return db
@@ -182,12 +186,14 @@ func (db *DB) GetEntity(key string) (*database.DataEntity, bool) {
 		return nil, false
 	}
 	entity, _ := raw.(*database.DataEntity)
+	db.touchLRU(key)
 	return entity, true
 }
 
 // PutEntity a DataEntity into DB
 func (db *DB) PutEntity(key string, entity *database.DataEntity) int {
 	ret := db.data.PutWithLock(key, entity)
+	db.touchLRU(key)
 	// db.insertCallback may be set as nil, during `if` and actually callback
 	// so introduce a local variable `cb`
 	if cb := db.insertCallback; ret > 0 && cb != nil {
@@ -216,6 +222,7 @@ func (db *DB) PutIfAbsent(key string, entity *database.DataEntity) int {
 func (db *DB) Remove(key string) {
 	raw, deleted := db.data.RemoveWithLock(key)
 	db.ttlMap.Remove(key)
+	db.lruMap.Remove(key)
 	taskKey := genExpireTask(key)
 	timewheel.Cancel(taskKey)
 	if cb := db.deleteCallback; cb != nil {
