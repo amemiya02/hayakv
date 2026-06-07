@@ -190,6 +190,114 @@ func (c *clusterCommands) shardsReply() iredis.Reply {
 	return protocol.MakeMultiRawReply(shards)
 }
 
-// handleAdmin is filled in by later tasks; returns nil for unknown subcommands so
-// handle() can produce the standard error.
-func (c *clusterCommands) handleAdmin(sub string, args [][]byte) iredis.Reply { return nil }
+func (c *clusterCommands) handleAdmin(sub string, args [][]byte) iredis.Reply {
+	switch sub {
+	case "ADDSLOTS":
+		return c.addDelSlots(args, true)
+	case "DELSLOTS":
+		return c.addDelSlots(args, false)
+	case "ADDSLOTSRANGE":
+		return c.addDelSlotsRange(args, true)
+	case "DELSLOTSRANGE":
+		return c.addDelSlotsRange(args, false)
+	case "SETSLOT":
+		return c.setSlot(args)
+	}
+	return nil
+}
+
+func (c *clusterCommands) addDelSlots(args [][]byte, add bool) iredis.Reply {
+	if len(args) == 0 {
+		return protocol.MakeArgNumErrReply("cluster")
+	}
+	slots := make([]uint16, 0, len(args))
+	for _, a := range args {
+		s, err := parseSlot(a)
+		if err != nil {
+			return err
+		}
+		if add && c.state.ownerOf(s) != nil {
+			return protocol.MakeErrReply(fmt.Sprintf("ERR Slot %d is already busy", s))
+		}
+		slots = append(slots, s)
+	}
+	if add {
+		c.state.addSlots(slots)
+	} else {
+		c.state.delSlots(slots)
+	}
+	_ = c.state.save()
+	return protocol.MakeOkReply()
+}
+
+func (c *clusterCommands) addDelSlotsRange(args [][]byte, add bool) iredis.Reply {
+	if len(args) == 0 || len(args)%2 != 0 {
+		return protocol.MakeArgNumErrReply("cluster")
+	}
+	var slots []uint16
+	for i := 0; i < len(args); i += 2 {
+		lo, e1 := parseSlot(args[i])
+		hi, e2 := parseSlot(args[i+1])
+		if e1 != nil {
+			return e1
+		}
+		if e2 != nil {
+			return e2
+		}
+		if lo > hi {
+			return protocol.MakeErrReply("ERR start slot number greater than end slot number")
+		}
+		for s := lo; s <= hi; s++ {
+			if add && c.state.ownerOf(s) != nil {
+				return protocol.MakeErrReply(fmt.Sprintf("ERR Slot %d is already busy", s))
+			}
+			slots = append(slots, s)
+		}
+	}
+	if add {
+		c.state.addSlots(slots)
+	} else {
+		c.state.delSlots(slots)
+	}
+	_ = c.state.save()
+	return protocol.MakeOkReply()
+}
+
+// setSlot handles SETSLOT <slot> NODE <id> and SETSLOT <slot> STABLE here.
+// IMPORTING/MIGRATING are added in Task 6 (migration).
+func (c *clusterCommands) setSlot(args [][]byte) iredis.Reply {
+	if len(args) < 2 {
+		return protocol.MakeArgNumErrReply("cluster|setslot")
+	}
+	slot, err := parseSlot(args[0])
+	if err != nil {
+		return err
+	}
+	mode := strings.ToUpper(string(args[1]))
+	switch mode {
+	case "STABLE":
+		c.state.clearMigration(slot)
+		_ = c.state.save()
+		return protocol.MakeOkReply()
+	case "NODE":
+		if len(args) != 3 {
+			return protocol.MakeArgNumErrReply("cluster|setslot")
+		}
+		nodeID := string(args[2])
+		if !c.state.assignSlotToNode(slot, nodeID) {
+			return protocol.MakeErrReply("ERR Unknown node " + nodeID)
+		}
+		c.state.clearMigration(slot)
+		_ = c.state.save()
+		return protocol.MakeOkReply()
+	case "IMPORTING", "MIGRATING":
+		return c.setSlotMigration(slot, mode, args) // Task 6
+	}
+	return protocol.MakeErrReply("ERR Invalid CLUSTER SETSLOT action or number of arguments")
+}
+
+// setSlotMigration is completed in Task 6 (IMPORTING/MIGRATING). Until then it
+// rejects the action so SETSLOT NODE/STABLE remain usable.
+func (c *clusterCommands) setSlotMigration(slot uint16, mode string, args [][]byte) iredis.Reply {
+	return protocol.MakeErrReply("ERR SETSLOT IMPORTING/MIGRATING not yet enabled")
+}

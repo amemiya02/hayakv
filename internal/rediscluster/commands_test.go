@@ -56,6 +56,51 @@ func TestClusterCountKeysInSlotZero(t *testing.T) {
 	}
 }
 
+func TestClusterAddDelSlots(t *testing.T) {
+	cc := newTestCommands(t)
+	if r := enc(t, cc.handle(cmd("CLUSTER", "ADDSLOTS", "0", "1", "2"))); string(r) != "+OK\r\n" {
+		t.Fatalf("ADDSLOTS = %q", r)
+	}
+	if !cc.state.imOwner(1) {
+		t.Fatal("slot 1 not owned after ADDSLOTS")
+	}
+	// double-assign must error
+	if r := enc(t, cc.handle(cmd("CLUSTER", "ADDSLOTS", "1"))); string(r[0]) != "-"[0:1] {
+		t.Fatalf("re-ADDSLOTS should error, got %q", r)
+	}
+	if r := enc(t, cc.handle(cmd("CLUSTER", "DELSLOTS", "1"))); string(r) != "+OK\r\n" {
+		t.Fatalf("DELSLOTS = %q", r)
+	}
+	if cc.state.imOwner(1) {
+		t.Fatal("slot 1 still owned after DELSLOTS")
+	}
+}
+
+func TestClusterAddSlotsRange(t *testing.T) {
+	cc := newTestCommands(t)
+	if r := enc(t, cc.handle(cmd("CLUSTER", "ADDSLOTSRANGE", "0", "100", "200", "300"))); string(r) != "+OK\r\n" {
+		t.Fatalf("ADDSLOTSRANGE = %q", r)
+	}
+	if cc.state.assignedSlots() != 202 { // 0..100 (101) + 200..300 (101)
+		t.Fatalf("assigned = %d, want 202", cc.state.assignedSlots())
+	}
+}
+
+func TestClusterSetSlotNode(t *testing.T) {
+	cc := newTestCommands(t)
+	// Introduce a peer and give it a slot via SETSLOT ... NODE.
+	peer := newNode(genNodeID(), "127.0.0.1", 7001)
+	cc.state.mu.Lock()
+	cc.state.nodes[peer.id] = peer
+	cc.state.mu.Unlock()
+	if r := enc(t, cc.handle(cmd("CLUSTER", "SETSLOT", "42", "NODE", peer.id))); string(r) != "+OK\r\n" {
+		t.Fatalf("SETSLOT NODE = %q", r)
+	}
+	if o := cc.state.ownerOf(42); o == nil || o.id != peer.id {
+		t.Fatalf("slot 42 owner = %v, want peer", o)
+	}
+}
+
 // cmd is a tiny helper to build a [][]byte command line.
 func cmd(parts ...string) [][]byte {
 	out := make([][]byte, len(parts))

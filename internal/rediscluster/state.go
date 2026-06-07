@@ -77,6 +77,28 @@ func (s *clusterState) delSlots(slots []uint16) {
 	}
 }
 
+// assignSlotToNode points slot at the node with id; returns false if unknown.
+func (s *clusterState) assignSlotToNode(slot uint16, id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.nodes[id]
+	if n == nil {
+		return false
+	}
+	if old := s.slots[slot]; old != nil {
+		old.delSlot(slot)
+	}
+	s.slots[slot] = n
+	n.addSlot(slot)
+	return true
+}
+
+func (s *clusterState) clearMigration(slot uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.migrations, slot)
+}
+
 func (s *clusterState) assignedSlots() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
