@@ -162,7 +162,7 @@ func (e *Encoder) WriteZSetEntry(key []byte, members []ZSetMember, expireMS uint
 		if err := e.w.writeString(m.Member); err != nil {
 			return err
 		}
-		if err := e.w.writeString(formatScore(m.Score)); err != nil {
+		if err := e.w.writeRawString(formatScore(m.Score)); err != nil {
 			return err
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/hayakv/config"
+	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
@@ -102,8 +103,8 @@ func newLRUMeta(lfu bool) lruMeta {
 	return lruMeta{data: lruClock()}
 }
 
-func (m lruMeta) lruValue() uint32 { return m.data & lruClockMax }
-func (m lruMeta) lfuCounter() uint8 { return uint8(m.data & 0xff) }
+func (m lruMeta) lruValue() uint32   { return m.data & lruClockMax }
+func (m lruMeta) lfuCounter() uint8  { return uint8(m.data & 0xff) }
 func (m lruMeta) lfuMinutes() uint32 { return (m.data >> 8) & 0xffff }
 
 func packLFU(minutes uint32, counter uint8) uint32 {
@@ -184,6 +185,12 @@ func evictionEnabled() bool {
 // Runs on the command/cron goroutine, taking per-key write locks for each
 // eviction (same discipline as activeExpireCycle), so it is correct under the
 // goroutine+redisdb global-lock triangle and inline under eventloop.
+//
+// IMPORTANT: usedMemory() traverses all shards with RLock; evictOneKey() takes
+// a write lock on one shard.  Calling usedMemory() after evictOneKey() on the
+// same shard would deadlock (Go RWMutex is not reentrant).  We solve this by
+// computing currentMemory once and decrementing it incrementally as keys are
+// evicted, avoiding repeated full traversals.
 func (server *Server) freeMemoryIfNeeded() bool {
 	limit := config.Properties.Maxmemory
 	if limit <= 0 {
@@ -192,24 +199,35 @@ func (server *Server) freeMemoryIfNeeded() bool {
 	if config.Properties.MaxmemoryPolicy == "noeviction" || config.Properties.MaxmemoryPolicy == "" {
 		return server.usedMemory() <= limit
 	}
-	if server.usedMemory() <= limit {
+	currentMemory := server.usedMemory()
+	if currentMemory <= limit {
 		return true
 	}
 	for loops := 0; loops < maxEvictLoops; loops++ {
-		if server.usedMemory() <= limit {
+		if currentMemory <= limit {
 			return true
 		}
-		evicted := server.evictOneKey()
+		freed, evicted := server.evictOneKeyWithSize()
 		if !evicted {
 			return false // nothing left to evict
 		}
+		currentMemory -= freed
 	}
-	return server.usedMemory() <= limit
+	return currentMemory <= limit
 }
 
 // evictOneKey selects and removes a single best-candidate key across all dbs.
 // Returns false if no eligible key exists under the policy.
 func (server *Server) evictOneKey() bool {
+	_, ok := server.evictOneKeyWithSize()
+	return ok
+}
+
+// evictOneKeyWithSize selects and removes a single best-candidate key across
+// all dbs, returning the estimated bytes freed and true, or (0, false) if no
+// eligible key exists.  The size estimate is taken under the key write lock
+// (before Remove) so the entity is still live.
+func (server *Server) evictOneKeyWithSize() (int64, bool) {
 	policy := config.Properties.MaxmemoryPolicy
 	volatile := strings.HasPrefix(policy, "volatile-")
 	samples := config.Properties.MaxmemorySamples
@@ -234,12 +252,18 @@ func (server *Server) evictOneKey() bool {
 			continue
 		}
 		db.RWLocks([]string{best}, nil)
+		// Estimate size before removing.
+		var freed int64
+		if raw, ok := db.data.GetWithLock(best); ok {
+			entity, _ := raw.(*database.DataEntity)
+			freed = estimateEntitySize(best, entity)
+		}
 		db.Remove(best)
 		db.addAof(toExpireDelAof(best))
 		db.RWUnLocks([]string{best}, nil)
-		return true
+		return freed, true
 	}
-	return false
+	return 0, false
 }
 
 // evictionCandidates picks the single best eviction target from sample under the

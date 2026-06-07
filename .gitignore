@@ -35,6 +35,8 @@ node3/
 .claude/
 docs/superpowers/
 .codegraph/
+CLAUDE.md
+.DS_Store
 
 # Misc
 redis2.conf

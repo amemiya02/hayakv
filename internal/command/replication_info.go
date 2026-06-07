@@ -68,7 +68,7 @@ func genReplicationInfo(server *Server) []byte {
 			lag = int64(time.Since(slave.lastAckTime).Seconds())
 		}
 		b.WriteString(fmt.Sprintf("slave%d:ip=%s,port=%d,state=online,offset=%d,lag=%d\r\n",
-			i, ip, slave.announcePort, slave.offset, lag))
+			i, ip, slave.announcePort, slave.ackOffset, lag))
 	}
 	b.WriteString("master_failover_state:no-failover\r\n")
 	b.WriteString(fmt.Sprintf("master_replid:%s\r\n", masterReplId))

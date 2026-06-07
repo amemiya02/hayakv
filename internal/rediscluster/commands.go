@@ -72,7 +72,9 @@ func (c *clusterCommands) handle(cmdLine [][]byte) iredis.Reply {
 		}
 		return protocol.MakeMultiBulkReply(raw)
 	case "INFO":
-		return protocol.MakeStatusReply(c.infoBody())
+		// Must be a bulk string ($...), not a simple string (+...),
+		// because infoBody() contains CRLF line separators.
+		return protocol.MakeBulkReply([]byte(c.infoBody()))
 	case "NODES":
 		return protocol.MakeBulkReply([]byte(c.nodesBody()))
 	case "SLOTS":
@@ -232,7 +234,14 @@ func (c *clusterCommands) handleAdmin(sub string, args [][]byte) iredis.Reply {
 		if len(args) != 1 {
 			return protocol.MakeArgNumErrReply("cluster|forget")
 		}
-		c.state.forgetNode(string(args[0]))
+		nodeID := string(args[0])
+		c.state.mu.RLock()
+		selfID := c.state.self.id
+		c.state.mu.RUnlock()
+		if nodeID == selfID {
+			return protocol.MakeErrReply("ERR I can't forget myself")
+		}
+		c.state.forgetNode(nodeID)
 		_ = c.state.save()
 		return protocol.MakeOkReply()
 	case "RESET":

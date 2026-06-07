@@ -222,7 +222,14 @@ func (g *gossipBus) handleConn(conn net.Conn) {
 			return
 		}
 	}
-	g.mergeFromMessage(h, decodeGossip(gossipBuf, int(h.gossipCount)))
+	// Extract sender IP from the connection's remote address.
+	senderIP := ""
+	if addr := conn.RemoteAddr(); addr != nil {
+		if tcpAddr, ok := addr.(*net.TCPAddr); ok {
+			senderIP = tcpAddr.IP.String()
+		}
+	}
+	g.mergeFromMessage(h, decodeGossip(gossipBuf, int(h.gossipCount)), senderIP)
 
 	// Reply to PING/MEET with a PONG carrying our own view.
 	if h.msgType == msgTypePing || h.msgType == msgTypeMeet {
@@ -232,8 +239,9 @@ func (g *gossipBus) handleConn(conn net.Conn) {
 }
 
 // mergeFromMessage updates local state with the sender's identity + slots and any
-// gossiped peers it didn't already know.
-func (g *gossipBus) mergeFromMessage(h *clusterMsgHeader, entries []gossipEntry) {
+// gossiped peers it didn't already know.  senderIP is the remote address from
+// the TCP connection (may be "" if unavailable).
+func (g *gossipBus) mergeFromMessage(h *clusterMsgHeader, entries []gossipEntry, senderIP string) {
 	g.state.mu.Lock()
 	defer g.state.mu.Unlock()
 	if h.currentEpoch > g.state.epoch {
@@ -250,11 +258,23 @@ func (g *gossipBus) mergeFromMessage(h *clusterMsgHeader, entries []gossipEntry)
 		sender.configEpoch = h.configEpoch
 		sender.pongRecv = time.Now().UnixMilli()
 		sender.linkUp = true
-		// Adopt the sender's slot ownership (authoritative for slots it claims).
+		// Record the sender's IP from the TCP connection if not already set.
+		if sender.ip == "" && senderIP != "" {
+			sender.ip = senderIP
+		}
+		// Adopt the sender's slot ownership only if its configEpoch is higher
+		// than the current owner's (Redis cluster epoch-based resolution).
 		for s := uint16(0); s < slotCount; s++ {
 			owns := h.slots[s/8]&(1<<(s%8)) != 0
 			if owns {
-				if old := g.state.slots[s]; old != nil && old != sender {
+				old := g.state.slots[s]
+				if old == sender {
+					continue // already own it
+				}
+				if old != nil && old.configEpoch >= h.configEpoch {
+					continue // current owner has equal or higher epoch; skip
+				}
+				if old != nil {
 					old.delSlot(s)
 				}
 				g.state.slots[s] = sender
@@ -337,7 +357,7 @@ func (g *gossipBus) meet(ip string, port, cport int) error {
 		g.state.nodes[h.senderID] = &clusterNode{id: h.senderID, ip: ip, port: port, cport: cport, flags: flagMaster, linkUp: true}
 	}
 	g.state.mu.Unlock()
-	g.mergeFromMessage(h, decodeGossip(gossipBuf, int(h.gossipCount)))
+	g.mergeFromMessage(h, decodeGossip(gossipBuf, int(h.gossipCount)), ip)
 	return nil
 }
 
@@ -383,6 +403,6 @@ func (g *gossipBus) pingOnePeer() {
 		if len(gossipBuf) > 0 {
 			_, _ = io.ReadFull(conn, gossipBuf)
 		}
-		g.mergeFromMessage(h, decodeGossip(gossipBuf, int(h.gossipCount)))
+		g.mergeFromMessage(h, decodeGossip(gossipBuf, int(h.gossipCount)), target.ip)
 	}
 }

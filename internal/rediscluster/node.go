@@ -34,7 +34,14 @@ type clusterNode struct {
 }
 
 func newNode(id, ip string, port int) *clusterNode {
-	return &clusterNode{id: id, ip: ip, port: port, cport: port + 10000, flags: flagMaster, linkUp: true}
+	cport := port + 10000
+	if cport > 65535 {
+		cport = port - 10000 // fall back to port - 10000 if port + 10000 overflows
+		if cport < 1 {
+			cport = port // last resort: use the same port
+		}
+	}
+	return &clusterNode{id: id, ip: ip, port: port, cport: cport, flags: flagMaster, linkUp: true}
 }
 
 func genNodeID() string {

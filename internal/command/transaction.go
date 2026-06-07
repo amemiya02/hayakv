@@ -119,8 +119,7 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 	// commands.  Serialises with concurrent denyoom writes on other keys.
 	// Lock ordering: memMu → key locks (same as execNormalCommand).
 	isOOMTxn := hasDenyOOM && db.server != nil &&
-		config.Properties.Maxmemory > 0 &&
-		config.Properties.MaxmemoryPolicy == "noeviction"
+		config.Properties.Maxmemory > 0
 	if isOOMTxn {
 		db.server.memMu.Lock()
 		defer db.server.memMu.Unlock()
@@ -130,7 +129,14 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 	}
 
 	db.RWLocks(writeKeys, readKeys)
-	defer db.RWUnLocks(writeKeys, readKeys)
+	if !isOOMTxn {
+		// Non-OOM: normal defer unlock (no usedMemory post-check).
+		defer db.RWUnLocks(writeKeys, readKeys)
+	}
+	// OOM path: no defer — we manually release before the post-check
+	// usedMemory() call to avoid the shardmap deadlock (ForEach acquires
+	// per-shard RLock which conflicts with our write locks).
+	// Re-acquired for rollback if needed.
 
 	// M5: snapshot write-key metadata for OOM rollback.
 	// (undo logs restore data; snapshot restores version + LRU.)
@@ -190,6 +196,14 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 		results = append(results, result)
 	}
 
+	// Release key locks BEFORE the post-check (OOM path only).
+	// usedMemory() calls ForEach → RLock on every shard; holding write
+	// locks here deadlocks.  memMu is still held so no concurrent
+	// denyoom can interfere.  Non-OOM path has a defer unlock above.
+	if isOOMTxn {
+		db.RWUnLocks(writeKeys, readKeys)
+	}
+
 	// M5: post-write OOM check.  The error might be OOM from a denyoom
 	// command inside the transaction, or a normal error.  Only do the
 	// full OOM rollback when we are in the OOM path AND memory is still
@@ -199,6 +213,10 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 	}
 
 	if !aborted { // success
+		if isOOMTxn {
+			// OOM path released locks before post-check; non-OOM has defer.
+			// Nothing to release here — locks are already released.
+		}
 		db.addVersion(writeKeys...)
 		// Flush buffered AOF to persister.
 		if len(aofBuf) > 0 {
@@ -211,6 +229,13 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 	}
 
 	// undo if aborted
+	if isOOMTxn {
+		// OOM path released locks above; re-acquire for rollback.
+		db.RWLocks(writeKeys, readKeys)
+		defer db.RWUnLocks(writeKeys, readKeys)
+	}
+	// Non-OOM: locks still held from above (defer will release).
+
 	size := len(undoCmdLines)
 	for i := size - 1; i >= 0; i-- {
 		curCmdLines := undoCmdLines[i]

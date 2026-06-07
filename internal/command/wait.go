@@ -59,7 +59,7 @@ func (server *Server) countAckedSlaves(offset int64) int {
 	defer server.masterStatus.mu.RUnlock()
 	count := 0
 	for slave := range server.masterStatus.onlineSlaves {
-		if slave.offset >= offset {
+		if slave.ackOffset >= offset {
 			count++
 		}
 	}

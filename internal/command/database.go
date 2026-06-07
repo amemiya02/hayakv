@@ -184,8 +184,7 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 		hasLRU     bool
 	}
 	isDenyOOMCmd := isDenyOOM(cmd) && db.server != nil &&
-		config.Properties.Maxmemory > 0 &&
-		config.Properties.MaxmemoryPolicy == "noeviction"
+		config.Properties.Maxmemory > 0
 
 	if isDenyOOMCmd {
 		db.server.memMu.Lock()
@@ -198,7 +197,6 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 
 		// Lock keys BEFORE snapshot so no other writer can interleave.
 		db.RWLocks(write, read)
-		defer db.RWUnLocks(write, read)
 
 		// Snapshot under key lock — reads are safe.
 		var snaps map[string]keySnapshot
@@ -235,6 +233,12 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 		}
 
 		result := cmd.executor(db, cmdLine[1:])
+
+		// Release key locks BEFORE the post-check.  usedMemory() calls
+		// ForEach → RLock on every shard; if we still hold a write lock
+		// on any shard this deadlocks (Go RWMutex is not reentrant).
+		// memMu is still held so no concurrent denyoom can interfere.
+		db.RWUnLocks(write, read)
 
 		// Post-write check: rollback if still over limit.
 		if db.server.usedMemory() > config.Properties.Maxmemory {

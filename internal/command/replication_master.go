@@ -55,7 +55,8 @@ const (
 type slaveClient struct {
 	conn         redis.Connection
 	state        uint8
-	offset       int64
+	sendOffset   int64 // next byte to send (send cursor for masterSendUpdatesToSlave)
+	ackOffset    int64 // last offset ACK'd by the slave (for WAIT / GETACK)
 	lastAckTime  time.Time
 	announceIp   string
 	announcePort int
@@ -65,11 +66,15 @@ type slaveClient struct {
 // replBacklog is a bounded ring of recent replication stream bytes used for
 // partial resync. When limit > 0, the buffer keeps at most `limit` bytes and
 // advances beginOffset as the oldest bytes are dropped. limit == 0 is unbounded.
+//
+// totalProduced tracks the cumulative bytes appended since the last RDB rewrite,
+// regardless of trim.  Used by masterCron to decide when a rewrite is needed.
 type replBacklog struct {
 	buf           []byte
 	beginOffset   int64
 	currentOffset int64
 	limit         int64
+	totalProduced int64 // bytes appended since last rewrite (never decremented by trim)
 }
 
 func (backlog *replBacklog) setLimit(limit int64) {
@@ -79,6 +84,7 @@ func (backlog *replBacklog) setLimit(limit int64) {
 func (backlog *replBacklog) appendBytes(bin []byte) {
 	backlog.buf = append(backlog.buf, bin...)
 	backlog.currentOffset += int64(len(bin))
+	backlog.totalProduced += int64(len(bin))
 	if backlog.limit > 0 && int64(len(backlog.buf)) > backlog.limit {
 		drop := int64(len(backlog.buf)) - backlog.limit
 		// advance beginOffset and drop the oldest `drop` bytes; copy to a fresh
@@ -329,14 +335,19 @@ func (server *Server) masterSendUpdatesToSlave() error {
 	}
 	server.masterStatus.mu.RUnlock()
 	for slave := range onlineSlaves {
-		slaveBeginOffset := slave.offset - beginOffset
+		slaveBeginOffset := slave.sendOffset - beginOffset
+		if slaveBeginOffset < 0 {
+			// slave missed data that was trimmed; force full resync.
+			server.removeSlave(slave)
+			continue
+		}
 		_, err := slave.conn.Write(backlog[slaveBeginOffset:])
 		if err != nil {
 			logger.Errorf("send updates backlog to slave failed: %v", err)
 			server.removeSlave(slave)
 			continue
 		}
-		slave.offset = currentOffset
+		slave.sendOffset = currentOffset
 	}
 	return nil
 }
@@ -407,7 +418,7 @@ func (server *Server) execReplConf(c redis.Connection, args [][]byte) redis.Repl
 			if err != nil {
 				return protocol.MakeErrReply("ERR value is not an integer or out of range")
 			}
-			slave.offset = offset
+			slave.ackOffset = offset
 			slave.lastAckTime = time.Now()
 			return &protocol.NoReply{}
 		case "listening-port":
@@ -446,7 +457,8 @@ func (server *Server) setSlaveOnline(slave *slaveClient, currentOffset int64) {
 	server.masterStatus.mu.Lock()
 	defer server.masterStatus.mu.Unlock()
 	slave.state = slaveStateOnline
-	slave.offset = currentOffset
+	slave.sendOffset = currentOffset
+	slave.ackOffset = currentOffset
 	server.masterStatus.onlineSlaves[slave] = struct{}{}
 }
 
@@ -486,14 +498,14 @@ func (server *Server) masterCron() {
 		server.masterStatus.backlog.appendBytes(pingBytes)
 	}
 	backlogLimit := server.masterStatus.backlog.limit
-	producedSinceBegin := server.masterStatus.backlog.currentOffset - server.masterStatus.backlog.beginOffset
+	totalProduced := server.masterStatus.backlog.totalProduced
 	server.masterStatus.mu.Unlock()
 	if err := server.masterSendUpdatesToSlave(); err != nil {
 		logger.Errorf("masterSendUpdatesToSlave error: %v", err)
 	}
 	// trigger rewrite only when there is a real limit and we have streamed several
-	// windows' worth of data since the last begin (so the on-disk RDB is stale).
-	if backlogLimit > 0 && producedSinceBegin > backlogLimit*backlogRewriteFactor &&
+	// windows' worth of data since the last RDB (so the on-disk RDB is stale).
+	if backlogLimit > 0 && totalProduced > backlogLimit*backlogRewriteFactor &&
 		!server.masterStatus.rewriting.Get() {
 		go func() {
 			server.masterStatus.rewriting.Set(true)

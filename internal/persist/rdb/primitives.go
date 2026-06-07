@@ -30,7 +30,7 @@ func (w *writer) writeLen(n uint64) error {
 	case n < (1 << 6):
 		return w.writeByte(byte(len6Bit<<6) | byte(n))
 	case n < (1 << 14):
-		return w.writeBytes([]byte{byte(len14Bit<<6) | byte(n >> 8), byte(n)})
+		return w.writeBytes([]byte{byte(len14Bit<<6) | byte(n>>8), byte(n)})
 	case n <= 0xFFFFFFFF:
 		var b [5]byte
 		b[0] = len32
@@ -78,6 +78,18 @@ func (w *writer) writeIntString(v int64) error {
 // hdt3213/rdb and redis both accept on load.
 func formatScore(f float64) []byte {
 	return []byte(strconv.FormatFloat(f, 'g', -1, 64))
+}
+
+// writeRawString writes s as a raw length-prefixed string WITHOUT the compact
+// integer optimisation that writeString applies.  Used for ZSet scores, which
+// real Redis encodes as length + ASCII double (never as int8/16/32 special
+// form).  Using writeString for scores like 1 would produce 0xC0 0x01 (int8
+// encoding); real Redis writes 0x01 0x31 (length 1 + "1").
+func (w *writer) writeRawString(s []byte) error {
+	if err := w.writeLen(uint64(len(s))); err != nil {
+		return err
+	}
+	return w.writeBytes(s)
 }
 
 // tryParseInt reports whether s is a canonical int32-range integer literal
