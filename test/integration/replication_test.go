@@ -147,3 +147,56 @@ func TestReplconfGetackUpdatesMasterView(t *testing.T) {
 	}
 	t.Fatalf("master never saw a slave0 with non-zero offset:\n%s", master.Info(ctx, "replication").Val())
 }
+
+func TestWaitOneReplica(t *testing.T) {
+	masterAddr, stopMaster := startHayakvRepl(t, "")
+	defer stopMaster()
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	if err := master.Set(ctx, "wk", "wv", 0).Err(); err != nil {
+		t.Fatalf("SET: %v", err)
+	}
+	pollGet(t, replica, "wk", "wv", 10*time.Second)
+
+	// WAIT 1 1000 should return 1 (one replica has caught up within 1s).
+	n, err := master.Do(ctx, "WAIT", 1, 1000).Int64()
+	if err != nil {
+		t.Fatalf("WAIT: %v", err)
+	}
+	if n < 1 {
+		t.Fatalf("WAIT 1 1000 = %d, want >= 1", n)
+	}
+}
+
+func TestWaitTimesOutWhenNotEnoughReplicas(t *testing.T) {
+	masterAddr, stopMaster := startHayakvRepl(t, "")
+	defer stopMaster()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	ctx := context.Background()
+	if err := master.Set(ctx, "x", "y", 0).Err(); err != nil {
+		t.Fatalf("SET: %v", err)
+	}
+	start := time.Now()
+	n, err := master.Do(ctx, "WAIT", 2, 300).Int64() // no replicas; must time out at ~300ms
+	if err != nil {
+		t.Fatalf("WAIT: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("WAIT 2 300 = %d, want 0", n)
+	}
+	if elapsed := time.Since(start); elapsed < 250*time.Millisecond {
+		t.Fatalf("WAIT returned too early: %s", elapsed)
+	}
+}

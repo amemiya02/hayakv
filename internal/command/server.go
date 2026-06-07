@@ -212,6 +212,8 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 		return server.execReplConf(c, cmdLine[1:])
 	} else if cmdName == "psync" {
 		return server.execPSync(c, cmdLine[1:])
+	} else if cmdName == "wait" {
+		return execWait(server, cmdLine[1:])
 	}
 	// todo: support multi database transaction
 
