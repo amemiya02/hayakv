@@ -170,7 +170,7 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 	prepare := cmd.prepare
 	write, read := prepare(cmdLine[1:])
 
-	// --- M5 denyoom path (global memory critical section) ---
+	// --- denyoom path (global memory critical section) ---
 	// maxmemory is a server-wide constraint.  memMu serialises the
 	// pre-check → execute sequence so that concurrent denyoom writes
 	// on different keys cannot both pass the pre-check.

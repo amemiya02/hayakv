@@ -153,7 +153,7 @@ func (d *Decoder) readObject(typeByte byte, db int, expireMS uint64) (Entry, err
 		}
 		return e, nil
 	default:
-		return e, fmt.Errorf("rdb: unsupported value type %d (listpack/intset/quicklist variants are out of M6 scope)", typeByte)
+		return e, fmt.Errorf("rdb: unsupported value type %d (listpack/intset/quicklist variants are not supported)", typeByte)
 	}
 }
 

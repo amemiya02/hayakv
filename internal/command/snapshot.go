@@ -35,7 +35,7 @@ type dbSnapshot struct {
 }
 
 // snapshotAllDBs copies every key of every database into rdb.Entry form. Because
-// hayakv executes commands single-threaded (M4), no key changes during this copy,
+// hayakv executes commands single-threaded, no key changes during this copy,
 // so the result is a consistent point-in-time view WITHOUT fork/COW.
 func (server *Server) snapshotAllDBs() []dbSnapshot {
 	snaps := make([]dbSnapshot, 0, len(server.dbSet))

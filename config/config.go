@@ -76,7 +76,7 @@ type ServerProperties struct {
 	ZSetMaxListpackValue   int `cfg:"zset-max-listpack-value"`
 	ListMaxListpackSize    int `cfg:"list-max-listpack-size"`
 
-	// M5: expiration + eviction
+	// expiration + eviction
 	Maxmemory        int64  `cfg:"maxmemory"`         // bytes; 0 = unlimited. Accepts 100mb/1gb forms via fixup.
 	MaxmemoryPolicy  string `cfg:"maxmemory-policy"`  // noeviction|allkeys-lru|allkeys-lfu|allkeys-random|volatile-lru|volatile-lfu|volatile-random|volatile-ttl
 	MaxmemorySamples int    `cfg:"maxmemory-samples"` // eviction pool sample size (Redis default 5)
@@ -145,7 +145,7 @@ func init() {
 		ZSetMaxListpackValue:   64,
 		ListMaxListpackSize:    128,
 
-		// M5 defaults (Redis 8)
+		// expiration/eviction defaults (Redis 8)
 		Maxmemory:        0, // unlimited
 		MaxmemoryPolicy:  "noeviction",
 		MaxmemorySamples: 5,

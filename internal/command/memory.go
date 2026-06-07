@@ -81,7 +81,7 @@ func valueSize(v interface{}) int64 {
 }
 
 // execMemory handles MEMORY USAGE key [SAMPLES n]. Other MEMORY subcommands are
-// out of M5 scope.
+// not supported.
 func execMemory(db *DB, args [][]byte) redis.Reply {
 	if len(args) < 1 {
 		return protocol.MakeArgNumErrReply("memory")

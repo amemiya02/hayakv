@@ -43,12 +43,12 @@ type DataEntity struct {
 	Data interface{}
 }
 
-// TypeName returns the object type name (legacy placeholder for M0)
+// TypeName returns the object type name (legacy placeholder for the godis baseline)
 func (e *DataEntity) TypeName() string {
 	return "legacy"
 }
 
-// EncodingName returns the encoding name (legacy placeholder for M0)
+// EncodingName returns the encoding name (legacy placeholder for the godis baseline)
 func (e *DataEntity) EncodingName() string {
 	return "go-native"
 }

@@ -31,7 +31,7 @@ func TestDefaultBackendNames(t *testing.T) {
 	}
 }
 
-func TestM0BackendSelection(t *testing.T) {
+func TestBackendSelection(t *testing.T) {
 	cfg := &config.ServerProperties{
 		NetBackend:    "goroutine",
 		EngineBackend: "shardmap",
@@ -58,7 +58,7 @@ func TestM0BackendSelection(t *testing.T) {
 func TestNewProtocolCodecRESP3(t *testing.T) {
 	codec, err := NewProtocolCodec(&config.ServerProperties{ProtoMax: "resp3"})
 	if err != nil {
-		t.Fatalf("resp3 codec should be available in M1: %v", err)
+		t.Fatalf("resp3 codec should be available: %v", err)
 	}
 	if codec == nil {
 		t.Fatal("nil codec")

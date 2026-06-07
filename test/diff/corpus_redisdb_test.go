@@ -1,8 +1,8 @@
 package diff
 
-// m2Corpus returns scenarios that exercise SCAN and other commands
+// redisDBCorpus returns scenarios that exercise SCAN and other commands
 // affected by the dict implementation change.
-func m2Corpus() []Scenario {
+func redisDBCorpus() []Scenario {
 	return []Scenario{
 		{Name: "scan empty", Commands: []Command{
 			{Args: []string{"SCAN", "0"}},

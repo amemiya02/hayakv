@@ -141,10 +141,10 @@ func TestGoRedisRESP2Connectivity(t *testing.T) {
 	if got := client.Ping(ctx).Val(); got != "PONG" {
 		t.Fatalf("PING = %q, want PONG", got)
 	}
-	if err := client.Set(ctx, "m0:key", "value", 0).Err(); err != nil {
+	if err := client.Set(ctx, "hayakv:key", "value", 0).Err(); err != nil {
 		t.Fatalf("SET: %v", err)
 	}
-	if got := client.Get(ctx, "m0:key").Val(); got != "value" {
+	if got := client.Get(ctx, "hayakv:key").Val(); got != "value" {
 		t.Fatalf("GET = %q, want value", got)
 	}
 }

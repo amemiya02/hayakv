@@ -1,7 +1,7 @@
 package diff
 
-// m1Corpus exercises RESP3-visible behaviors. The runner prepends HELLO 3.
-func m1Corpus() []Scenario {
+// resp3Corpus exercises RESP3-visible behaviors. The runner prepends HELLO 3.
+func resp3Corpus() []Scenario {
 	return []Scenario{
 		{Name: "resp3 get miss is null", Commands: []Command{
 			{Args: []string{"GET", "nope"}},

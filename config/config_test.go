@@ -82,7 +82,7 @@ func TestParseMaxmemoryPlainAndUnits(t *testing.T) {
 }
 
 func TestMemoryConfigDefaults(t *testing.T) {
-	// init() should have populated package Properties with M5 defaults.
+	// init() should have populated package Properties with expiration/eviction defaults.
 	if Properties.Hz != 10 {
 		t.Fatalf("default hz = %d, want 10", Properties.Hz)
 	}

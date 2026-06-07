@@ -90,7 +90,7 @@ func TestReplicaofAlias(t *testing.T) {
 	if err := master.Set(ctx, "k1", "v1", 0).Err(); err != nil {
 		t.Fatalf("master SET: %v", err)
 	}
-	// Use REPLICAOF (the M7 alias), not SLAVEOF.
+	// Use REPLICAOF (the modern alias), not SLAVEOF.
 	mhost, mport := splitAddr(t, masterAddr)
 	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
 		t.Fatalf("REPLICAOF: %v", err)

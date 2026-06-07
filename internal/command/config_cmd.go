@@ -9,7 +9,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
 
-// execConfig implements a minimal CONFIG GET/SET sufficient for M5 differential
+// execConfig implements a minimal CONFIG GET/SET sufficient for the eviction/expiry differential
 // scenarios and for go-redis/redis-py to negotiate eviction settings.
 func execConfig(args [][]byte) redis.Reply {
 	if len(args) < 2 {
@@ -34,7 +34,7 @@ func execConfig(args [][]byte) redis.Reply {
 }
 
 // configGet returns name/value byte pairs for the (possibly wildcard) param.
-// M5 only models the four eviction/cron parameters.
+// Only the four eviction/cron parameters are modeled.
 func configGet(param string) [][]byte {
 	known := map[string]func() string{
 		"maxmemory":         func() string { return strconv.FormatInt(config.Properties.Maxmemory, 10) },

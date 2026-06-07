@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  m0:
+  test:
     runs-on: ubuntu-latest
 
     services:
@@ -55,8 +55,8 @@ jobs:
 
       - name: Differential tests
         run: |
-          go test -count=1 ./test/diff -run TestM0DifferentialRESP2
-          go test -count=1 ./test/diff -run TestM2DifferentialRedisDB
+          go test -count=1 ./test/diff -run TestDifferentialRESP2
+          go test -count=1 ./test/diff -run TestDifferentialRedisDB
 
       - name: Build
         run: go build ./cmd/hayakv

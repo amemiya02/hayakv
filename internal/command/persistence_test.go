@@ -2,9 +2,7 @@ package database
 
 import (
 	"io/ioutil"
-	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -16,15 +14,32 @@ import (
 )
 
 func TestLoadRDB(t *testing.T) {
-	_, b, _, _ := runtime.Caller(0)
-	testDir := filepath.Dir(b)
-	projectRoot := filepath.Dir(filepath.Dir(b))
-	os.Chdir(projectRoot)
+	tmpDir := t.TempDir()
+	rdbPath := filepath.Join(tmpDir, "test.rdb")
+
+	// Phase 1: populate a server and SAVE an RDB file (.gitignore excludes
+	// *.rdb, so the fixture must be generated rather than checked in).
+	config.Properties = &config.ServerProperties{
+		Databases:      16,
+		AppendOnly:     true,
+		AppendFilename: filepath.Join(tmpDir, "gen.aof"),
+		AppendFsync:    aof.FsyncAlways,
+		RDBFilename:    rdbPath,
+	}
+	gen := NewStandaloneServer()
+	conn := connection.NewFakeConn()
+	asserts.AssertNotError(t, gen.Exec(conn, utils.ToCmdLine("Set", "str", "str")))
+	asserts.AssertNotError(t, gen.Exec(conn, utils.ToCmdLine("RPush", "list", "1", "2", "3", "4")))
+	asserts.AssertNotError(t, gen.Exec(conn, utils.ToCmdLine("HSet", "hash", "1", "1")))
+	asserts.AssertNotError(t, gen.Exec(conn, utils.ToCmdLine("ZAdd", "zset", "1", "0", "1", "1")))
+	asserts.AssertNotError(t, gen.Exec(conn, utils.ToCmdLine("SAdd", "set", "1")))
+	asserts.AssertStatusReply(t, gen.Exec(conn, utils.ToCmdLine("Save")), "OK")
+
+	// Phase 2: a fresh server with AOF disabled loads the RDB on boot.
 	config.Properties = &config.ServerProperties{
 		AppendOnly:  false,
-		RDBFilename: filepath.Join(testDir, "testdata", "test.rdb"),
+		RDBFilename: rdbPath,
 	}
-	conn := connection.NewFakeConn()
 	rdbDB := NewStandaloneServer()
 	result := rdbDB.Exec(conn, utils.ToCmdLine("Get", "str"))
 	asserts.AssertBulkReply(t, result, "str")

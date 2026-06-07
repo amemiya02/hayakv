@@ -21,7 +21,7 @@ func TestCodecDecodeOneAndEncodeRESP2(t *testing.T) {
 	}
 }
 
-func TestCodecEncodeIgnoresRESP3InM0(t *testing.T) {
+func TestCodecEncodeTreatsRESP3AsRESP2(t *testing.T) {
 	codec := Codec{}
 	got := codec.Encode(protocol.MakeStatusReply("PONG"), iface.RESP3)
 	want := []byte("+PONG\r\n")

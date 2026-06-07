@@ -48,20 +48,18 @@ type ProtocolCodec interface {
 
 // StorageEngine is the seam for the command execution back-end.
 //
-// M0 DESIGN DECISION: This seam is intentionally cut at the "execute a command"
-// altitude (godis DB.Exec), not at the lower Get/Set/Del/Expire level described
-// in spec §3.2/§3.3. The godis baseline bundles command dispatch and storage in
-// one package (internal/command), so the M0 implementation =
+// DESIGN DECISION: This seam is intentionally cut at the "execute a command"
+// altitude (godis DB.Exec), not at the lower Get/Set/Del/Expire level. The
+// godis baseline bundles command dispatch and storage in one package
+// (internal/command), so the baseline implementation =
 // database.NewStandaloneServer() which is the full DB including all handlers.
 //
-// This means M2's redisdb backend will need to either:
-//   - reimplement command dispatch, or
-//   - re-cut the seam lower (extract an internal/engine/{shardmap,redisdb} layer)
-//     so handlers are shared across engines.
+// Consequence: the redisdb backend does not reimplement command dispatch; it
+// switches the underlying dict via the factory in internal/datastruct/dict
+// (SetEngine/MakeDict) while sharing all of internal/command.
 //
-// This is a deliberate M0 strangler-pattern shortcut: keep godis code intact,
-// add seam adapters around it, and defer the deeper refactoring to M2 when the
-// redisdb backend actually needs it.
+// This is a deliberate strangler-pattern shortcut: keep godis code intact and
+// add seam adapters around it instead of re-cutting the seam lower.
 type StorageEngine interface {
 	Exec(client iredis.Connection, cmdLine CmdLine) iredis.Reply
 	AfterClientClose(client iredis.Connection)

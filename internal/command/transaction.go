@@ -115,7 +115,7 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 		return protocol.MakeEmptyMultiBulkReply()
 	}
 
-	// M5: global memory critical section for transactions with denyoom
+	// global memory critical section for transactions with denyoom
 	// commands.  Serialises with concurrent denyoom writes on other keys.
 	// Lock ordering: memMu → key locks (same as execNormalCommand).
 	// Redis only does pre-check (evict-or-reject); no post-check rollback.

@@ -21,7 +21,7 @@ import (
 
 func TestReplicationSlaveSide(t *testing.T) {
 	if os.Getenv("HAYAKV_ENABLE_LEGACY_REPLICATION_TESTS") != "1" {
-		t.Skip("replication is M7 scope; set HAYAKV_ENABLE_LEGACY_REPLICATION_TESTS=1 to run this legacy godis test")
+		t.Skip("legacy godis replication test; set HAYAKV_ENABLE_LEGACY_REPLICATION_TESTS=1 to run this legacy godis test")
 	}
 	tmpDir, err := ioutil.TempDir("", "godis")
 	if err != nil {
@@ -176,7 +176,7 @@ func TestReplicationSlaveSide(t *testing.T) {
 
 func TestReplicationFailover(t *testing.T) {
 	if os.Getenv("HAYAKV_ENABLE_LEGACY_REPLICATION_TESTS") != "1" {
-		t.Skip("replication is M7 scope; set HAYAKV_ENABLE_LEGACY_REPLICATION_TESTS=1 to run this legacy godis test")
+		t.Skip("legacy godis replication test; set HAYAKV_ENABLE_LEGACY_REPLICATION_TESTS=1 to run this legacy godis test")
 	}
 	tmpDir, err := os.MkdirTemp("", "godis")
 	if err != nil {

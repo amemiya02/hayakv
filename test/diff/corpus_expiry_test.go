@@ -1,6 +1,6 @@
 package diff
 
-// m5Corpus exercises ONLY deterministic, byte-comparable expiration/eviction
+// expiryCorpus exercises ONLY deterministic, byte-comparable expiration/eviction
 // behavior. used_memory, INFO memory, and *which* key an approximate LRU/LFU
 // evicts are non-deterministic and intentionally excluded (see harness note).
 //
@@ -11,7 +11,7 @@ package diff
 //   - OOM rejection under noeviction (exact -OOM error string)
 //   - CONFIG GET maxmemory-policy round-trip
 //   - OBJECT IDLETIME returns an integer (value normalized away below)
-func m5Corpus() []Scenario {
+func expiryCorpus() []Scenario {
 	return []Scenario{
 		{Name: "expire then ttl bounded", Commands: []Command{
 			{Args: []string{"SET", "k", "v"}},

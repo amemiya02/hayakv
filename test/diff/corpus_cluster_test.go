@@ -1,10 +1,10 @@
 package diff
 
-// m8Corpus returns scenarios that exercise Redis Cluster commands:
+// clusterCorpus returns scenarios that exercise Redis Cluster commands:
 // CLUSTER KEYSLOT, MYID, INFO, NODES, SLOTS, SHARDS, ADDSLOTS,
 // ADDSLOTSRANGE, COUNTKEYSINSLOT, GETKEYSINSLOT, CROSSSLOT errors,
 // and MOVED redirects.
-func m8Corpus() []Scenario {
+func clusterCorpus() []Scenario {
 	return []Scenario{
 		// --- Pure cluster introspection (no slots needed) ---
 		{Name: "cluster keyslot foo", Commands: []Command{

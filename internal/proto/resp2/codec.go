@@ -33,7 +33,7 @@ func (Codec) DecodeOne(data []byte) (iredis.Reply, error) {
 	return parser.ParseOne(data)
 }
 
-// Encode serialises a reply. In M0 RESP3 is treated identically to RESP2.
+// Encode serialises a reply. RESP3 is treated identically to RESP2.
 func (Codec) Encode(reply iredis.Reply, _ iface.RespVersion) []byte {
 	if reply == nil {
 		return nil

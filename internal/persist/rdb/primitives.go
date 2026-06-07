@@ -202,7 +202,7 @@ func (r *reader) readString() ([]byte, error) {
 		}
 		return []byte(strconv.FormatInt(int64(int32(binary.LittleEndian.Uint32(b))), 10)), nil
 	case encLZF:
-		return nil, fmt.Errorf("rdb: LZF-compressed strings are not supported in M6")
+		return nil, fmt.Errorf("rdb: LZF-compressed strings are not supported")
 	default:
 		return nil, fmt.Errorf("rdb: unknown special string encoding %d", n)
 	}

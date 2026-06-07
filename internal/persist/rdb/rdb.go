@@ -14,7 +14,7 @@ const (
 	opFunction2 = 0xF5
 )
 
-// Value type bytes (M6 reads/writes the plain 0..4 forms).
+// Value type bytes (hayakv reads/writes the plain 0..4 forms).
 const (
 	typeString = 0
 	typeList   = 1

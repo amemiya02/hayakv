@@ -9,7 +9,7 @@ type Scenario struct {
 	Commands []Command
 }
 
-func m0Corpus() []Scenario {
+func baseCorpus() []Scenario {
 	return []Scenario{
 		{Name: "ping", Commands: []Command{{Args: []string{"PING"}}}},
 		{Name: "string set get del", Commands: []Command{

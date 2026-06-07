@@ -111,7 +111,7 @@ func NewStandaloneServer() *Server {
 	server.slaveStatus = initReplSlaveStatus()
 	server.initMasterStatus()
 	server.startReplCron()
-	// M5: StartCron is NOT started here. The goroutine backend calls
+	// StartCron is NOT started here. The goroutine backend calls
 	// server.StartCron() explicitly after construction. The eventloop backend
 	// never starts it (active-expire runs inline from the loop tick).
 	server.role = masterRole // The initialization process does not require atomicity

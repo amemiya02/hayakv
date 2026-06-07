@@ -56,7 +56,7 @@ func (s *clusterState) nodeByID(id string) *clusterNode {
 	return s.nodes[id]
 }
 
-// migrateReply is the scoped M8-core MIGRATE command result (Task 8 wires the
+// migrateReply is the scoped MIGRATE command result (a follow-up wires the
 // real DUMP/RESTORE transfer against the engine). It validates args and reports
 // "NOKEY" when the key list is empty, matching redis for the common path.
 func migrateReply(args [][]byte) iredis.Reply {

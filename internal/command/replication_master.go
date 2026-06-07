@@ -118,6 +118,7 @@ func (backlog *replBacklog) isValidOffset(offset int64) bool {
 
 type masterStatus struct {
 	mu                sync.RWMutex
+	sendMu            sync.Mutex // serializes masterSendUpdatesToSlave (cron / AOF listener / getack)
 	replId            string
 	backlog           *replBacklog
 	slaveMap          map[redis.Connection]*slaveClient
@@ -383,6 +384,12 @@ func (server *Server) masterTryPartialSyncWithSlave(slave *slaveClient, replId s
 // masterSendUpdatesToSlave only sends data to online slaves after bgSave is finished
 // if bgSave is running, updates will be sent after the saving finished
 func (server *Server) masterSendUpdatesToSlave() error {
+	// Serialize senders: concurrent sends would compute the same un-sent
+	// window from the same snapshot and stream duplicate bytes to a replica.
+	// sendMu also guards slaveClient.sendOffset, which is only touched here
+	// and in setSlaveOnline (before the slave is visible to this loop).
+	server.masterStatus.sendMu.Lock()
+	defer server.masterStatus.sendMu.Unlock()
 	onlineSlaves := make(map[*slaveClient]struct{})
 	server.masterStatus.mu.RLock()
 	beginOffset := server.masterStatus.backlog.beginOffset

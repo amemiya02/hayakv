@@ -1,7 +1,7 @@
 package diff
 
 // NOTE: used_memory / INFO memory / approximate-LRU eviction order are non-deterministic;
-// the M5 corpus covers only TTL/expire/PERSIST/EXPIRETIME and OOM-under-noeviction
+// the expiry corpus covers only TTL/expire/PERSIST/EXPIRETIME and OOM-under-noeviction
 // (byte-stable). Add normalization hooks before diffing memory.
 
 import (
@@ -291,14 +291,14 @@ func runScenario(t *testing.T, addr string, scenario Scenario) [][]byte {
 	return replies
 }
 
-func TestM1DifferentialRESP3(t *testing.T) {
+func TestDifferentialRESP3(t *testing.T) {
 	hayakvAddr, stopHayakv := startHayakvProto(t, "resp3")
 	defer stopHayakv()
 	redisAddr, stopRedis := startRedis8(t)
 	defer stopRedis()
 
 	hello := Command{Args: []string{"HELLO", "3"}}
-	for _, scenario := range m1Corpus() {
+	for _, scenario := range resp3Corpus() {
 		scenario := scenario
 		t.Run(scenario.Name, func(t *testing.T) {
 			withHello := Scenario{Name: scenario.Name,
@@ -318,13 +318,13 @@ func TestM1DifferentialRESP3(t *testing.T) {
 	}
 }
 
-func TestM2DifferentialRedisDB(t *testing.T) {
+func TestDifferentialRedisDB(t *testing.T) {
 	hayakvAddr, stopHayakv := startHayakvWithEngine(t, "redisdb")
 	defer stopHayakv()
 	redisAddr, stopRedis := startRedis8(t)
 	defer stopRedis()
 
-	for _, scenario := range m2Corpus() {
+	for _, scenario := range redisDBCorpus() {
 		scenario := scenario
 		t.Run(scenario.Name, func(t *testing.T) {
 			hayakvReplies := runScenario(t, hayakvAddr, scenario)
@@ -342,13 +342,13 @@ func TestM2DifferentialRedisDB(t *testing.T) {
 	}
 }
 
-func TestM0DifferentialRESP2(t *testing.T) {
+func TestDifferentialRESP2(t *testing.T) {
 	hayakvAddr, stopHayakv := startHayakv(t)
 	defer stopHayakv()
 	redisAddr, stopRedis := startRedis8(t)
 	defer stopRedis()
 
-	for _, scenario := range m0Corpus() {
+	for _, scenario := range baseCorpus() {
 		scenario := scenario
 		t.Run(scenario.Name, func(t *testing.T) {
 			hayakvReplies := runScenario(t, hayakvAddr, scenario)
@@ -365,10 +365,10 @@ func TestM0DifferentialRESP2(t *testing.T) {
 	}
 }
 
-// startHayakvM5 boots hayakv (goroutine+redisdb+resp2) with extra config lines
+// startHayakvExtraConfig boots hayakv (goroutine+redisdb+resp2) with extra config lines
 // appended (e.g. "maxmemory-policy allkeys-lru\n"). Mirrors startHayakvWithConfig
-// but allows M5 keys the fixed helper cannot express.
-func startHayakvM5(t *testing.T, extra string) (string, func()) {
+// but allows eviction/expiry keys the fixed helper cannot express.
+func startHayakvExtraConfig(t *testing.T, extra string) (string, func()) {
 	t.Helper()
 	root := projectRoot(t)
 	tmp := t.TempDir()
@@ -399,13 +399,13 @@ func startHayakvM5(t *testing.T, extra string) (string, func()) {
 	}
 }
 
-func TestM5Differential(t *testing.T) {
-	hayakvAddr, stopHayakv := startHayakvM5(t, "")
+func TestDifferentialExpiry(t *testing.T) {
+	hayakvAddr, stopHayakv := startHayakvExtraConfig(t, "")
 	defer stopHayakv()
 	redisAddr, stopRedis := startRedis8(t)
 	defer stopRedis()
 
-	for _, scenario := range m5Corpus() {
+	for _, scenario := range expiryCorpus() {
 		scenario := scenario
 		t.Run(scenario.Name, func(t *testing.T) {
 			hayakvReplies := runScenario(t, hayakvAddr, scenario)
