@@ -147,7 +147,7 @@ func undoSetChange(db *DB, args [][]byte) []CmdLine {
 
 func rollbackZSetFields(db *DB, key string, fields ...string) []CmdLine {
 	var undoCmdLines [][][]byte
-	zset, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return nil
 	}
@@ -158,15 +158,15 @@ func rollbackZSetFields(db *DB, key string, fields ...string) []CmdLine {
 		return undoCmdLines
 	}
 	for _, field := range fields {
-		elem, ok := zset.Get(field)
+		score, ok := zset.Get(field)
 		if !ok {
 			undoCmdLines = append(undoCmdLines,
 				utils.ToCmdLine("ZREM", key, field),
 			)
 		} else {
-			score := strconv.FormatFloat(elem.Score, 'f', -1, 64)
+			scoreStr := strconv.FormatFloat(score, 'f', -1, 64)
 			undoCmdLines = append(undoCmdLines,
-				utils.ToCmdLine("ZADD", key, score, field),
+				utils.ToCmdLine("ZADD", key, scoreStr, field),
 			)
 		}
 	}

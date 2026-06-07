@@ -12,7 +12,10 @@ import (
 	"strings"
 )
 
-func (db *DB) getAsSortedSet(key string) (*SortedSet.SortedSet, protocol.ErrorReply) {
+// getAsZSet returns the *object.ZSet for the given key, or nil if key doesn't exist.
+// Unlike the old getAsSortedSet, this does NOT force conversion to skiplist,
+// so small zsets remain in listpack encoding.
+func (db *DB) getAsZSet(key string) (*object.ZSet, protocol.ErrorReply) {
 	entity, exists := db.GetEntity(key)
 	if !exists {
 		return nil, nil
@@ -22,19 +25,24 @@ func (db *DB) getAsSortedSet(key string) (*SortedSet.SortedSet, protocol.ErrorRe
 		if v.Type != object.TypeZSet {
 			return nil, &protocol.WrongTypeErrReply{}
 		}
-		zset, ok := v.Value().(*SortedSet.SortedSet)
+		zset, ok := v.Value().(*object.ZSet)
 		if !ok {
 			return nil, &protocol.WrongTypeErrReply{}
 		}
+		// Sync encoding from internal state (lazy — only converts on read ops that need it)
+		v.Encoding = zset.CurrentEncoding()
 		return zset, nil
-	case *SortedSet.SortedSet:
+	case *object.ZSet:
 		return v, nil
 	default:
 		return nil, &protocol.WrongTypeErrReply{}
 	}
 }
 
-func (db *DB) getOrInitSortedSet(key string) (sortedSet *SortedSet.SortedSet, inited bool, errReply protocol.ErrorReply) {
+// getOrInitZSet returns the *object.ZSet for the given key, creating a new
+// listpack-backed zset if the key doesn't exist. Unlike the old
+// getOrInitSortedSet, this does NOT force conversion to skiplist.
+func (db *DB) getOrInitZSet(key string) (zset *object.ZSet, inited bool, errReply protocol.ErrorReply) {
 	entity, exists := db.GetEntity(key)
 	if exists {
 		switch v := entity.Data.(type) {
@@ -42,27 +50,29 @@ func (db *DB) getOrInitSortedSet(key string) (sortedSet *SortedSet.SortedSet, in
 			if v.Type != object.TypeZSet {
 				return nil, false, &protocol.WrongTypeErrReply{}
 			}
-			zset, ok := v.Value().(*SortedSet.SortedSet)
+			zset, ok := v.Value().(*object.ZSet)
 			if !ok {
 				return nil, false, &protocol.WrongTypeErrReply{}
 			}
+			// Sync encoding from internal state
+			v.Encoding = zset.CurrentEncoding()
 			return zset, false, nil
-		case *SortedSet.SortedSet:
+		case *object.ZSet:
 			return v, false, nil
 		default:
 			return nil, false, &protocol.WrongTypeErrReply{}
 		}
 	}
-	sortedSet = SortedSet.Make()
+	zset = object.NewZSet()
 	robj := &object.Robj{
 		Type:     object.TypeZSet,
-		Encoding: object.EncSkiplist,
-		Ptr:      sortedSet,
+		Encoding: object.EncListpack,
+		Ptr:      zset,
 	}
 	db.PutEntity(key, &database.DataEntity{
 		Data: robj,
 	})
-	return sortedSet, true, nil
+	return zset, true, nil
 }
 
 // execZAdd adds member into sorted set
@@ -87,21 +97,23 @@ func execZAdd(db *DB, args [][]byte) redis.Reply {
 	}
 
 	// get or init entity
-	sortedSet, _, errReply := db.getOrInitSortedSet(key)
+	zset, _, errReply := db.getOrInitZSet(key)
 	if errReply != nil {
 		return errReply
 	}
 
-	i := 0
+	added := 0
 	for _, e := range elements {
-		if sortedSet.Add(e.Member, e.Score) {
-			i++
+		if zset.Add(e.Member, e.Score) {
+			added++
 		}
 	}
+	// Sync encoding: Add may have triggered listpack->skiplist conversion
+	syncZSetEncodingAfterWrite(db, key, zset)
 
 	db.addAof(utils.ToCmdLine3("zadd", args...))
 
-	return protocol.MakeIntReply(int64(i))
+	return protocol.MakeIntReply(int64(added))
 }
 
 func undoZAdd(db *DB, args [][]byte) []CmdLine {
@@ -120,19 +132,19 @@ func execZScore(db *DB, args [][]byte) redis.Reply {
 	key := string(args[0])
 	member := string(args[1])
 
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.NullBulkReply{}
 	}
 
-	element, exists := sortedSet.Get(member)
+	score, exists := zset.Get(member)
 	if !exists {
 		return &protocol.NullBulkReply{}
 	}
-	value := strconv.FormatFloat(element.Score, 'f', -1, 64)
+	value := strconv.FormatFloat(score, 'f', -1, 64)
 	return protocol.MakeBulkReply([]byte(value))
 }
 
@@ -143,15 +155,15 @@ func execZRank(db *DB, args [][]byte) redis.Reply {
 	member := string(args[1])
 
 	// get entity
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.NullBulkReply{}
 	}
 
-	rank := sortedSet.GetRank(member, false)
+	rank := zset.GetRank(member, false)
 	if rank < 0 {
 		return &protocol.NullBulkReply{}
 	}
@@ -165,15 +177,15 @@ func execZRevRank(db *DB, args [][]byte) redis.Reply {
 	member := string(args[1])
 
 	// get entity
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.NullBulkReply{}
 	}
 
-	rank := sortedSet.GetRank(member, true)
+	rank := zset.GetRank(member, true)
 	if rank < 0 {
 		return &protocol.NullBulkReply{}
 	}
@@ -186,15 +198,15 @@ func execZCard(db *DB, args [][]byte) redis.Reply {
 	key := string(args[0])
 
 	// get entity
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return protocol.MakeIntReply(0)
 	}
 
-	return protocol.MakeIntReply(sortedSet.Len())
+	return protocol.MakeIntReply(int64(zset.Len()))
 }
 
 // execZRange gets members in range, sort by score in ascending order
@@ -249,16 +261,16 @@ func execZRevRange(db *DB, args [][]byte) redis.Reply {
 
 func range0(db *DB, key string, start int64, stop int64, withScores bool, desc bool) redis.Reply {
 	// get data
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.EmptyMultiBulkReply{}
 	}
 
 	// compute index
-	size := sortedSet.Len() // assert: size > 0
+	size := int64(zset.Len()) // assert: size > 0
 	if start < -1*size {
 		start = 0
 	} else if start < 0 {
@@ -280,7 +292,7 @@ func range0(db *DB, key string, start int64, stop int64, withScores bool, desc b
 	}
 
 	// assert: start in [0, size - 1], stop in [start, size]
-	slice := sortedSet.RangeByRank(start, stop, desc)
+	slice := zset.RangeByRank(start, stop, desc)
 	if withScores {
 		result := make([][]byte, len(slice)*2)
 		i := 0
@@ -317,15 +329,15 @@ func execZCount(db *DB, args [][]byte) redis.Reply {
 	}
 
 	// get data
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return protocol.MakeIntReply(0)
 	}
 
-	return protocol.MakeIntReply(sortedSet.RangeCount(min, max))
+	return protocol.MakeIntReply(zset.RangeCount(min, max))
 }
 
 /*
@@ -333,15 +345,15 @@ func execZCount(db *DB, args [][]byte) redis.Reply {
  */
 func rangeByScore0(db *DB, key string, min SortedSet.Border, max SortedSet.Border, offset int64, limit int64, withScores bool, desc bool) redis.Reply {
 	// get data
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.EmptyMultiBulkReply{}
 	}
 
-	slice := sortedSet.Range(min, max, offset, limit, desc)
+	slice := zset.Range(min, max, offset, limit, desc)
 	if withScores {
 		result := make([][]byte, len(slice)*2)
 		i := 0
@@ -475,15 +487,15 @@ func execZRemRangeByScore(db *DB, args [][]byte) redis.Reply {
 	}
 
 	// get data
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.EmptyMultiBulkReply{}
 	}
 
-	removed := sortedSet.RemoveRange(min, max)
+	removed := zset.RemoveRange(min, max)
 	if removed > 0 {
 		db.addAof(utils.ToCmdLine3("zremrangebyscore", args...))
 	}
@@ -503,16 +515,16 @@ func execZRemRangeByRank(db *DB, args [][]byte) redis.Reply {
 	}
 
 	// get data
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return protocol.MakeIntReply(0)
 	}
 
 	// compute index
-	size := sortedSet.Len() // assert: size > 0
+	size := int64(zset.Len()) // assert: size > 0
 	if start < -1*size {
 		start = 0
 	} else if start < 0 {
@@ -534,7 +546,7 @@ func execZRemRangeByRank(db *DB, args [][]byte) redis.Reply {
 	}
 
 	// assert: start in [0, size - 1], stop in [start, size]
-	removed := sortedSet.RemoveByRank(start, stop)
+	removed := zset.RemoveByRank(start, stop)
 	if removed > 0 {
 		db.addAof(utils.ToCmdLine3("zremrangebyrank", args...))
 	}
@@ -552,15 +564,15 @@ func execZPopMin(db *DB, args [][]byte) redis.Reply {
 		}
 	}
 
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return protocol.MakeEmptyMultiBulkReply()
 	}
 
-	removed := sortedSet.PopMin(count)
+	removed := zset.PopMin(count)
 	if len(removed) > 0 {
 		db.addAof(utils.ToCmdLine3("zpopmin", args...))
 	}
@@ -583,17 +595,17 @@ func execZRem(db *DB, args [][]byte) redis.Reply {
 	}
 
 	// get entity
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return protocol.MakeIntReply(0)
 	}
 
 	var deleted int64 = 0
 	for _, field := range fields {
-		if sortedSet.Remove(field) {
+		if zset.Remove(field) {
 			deleted++
 		}
 	}
@@ -624,19 +636,21 @@ func execZIncrBy(db *DB, args [][]byte) redis.Reply {
 	}
 
 	// get or init entity
-	sortedSet, _, errReply := db.getOrInitSortedSet(key)
+	zset, _, errReply := db.getOrInitZSet(key)
 	if errReply != nil {
 		return errReply
 	}
 
-	element, exists := sortedSet.Get(field)
+	existingScore, exists := zset.Get(field)
 	if !exists {
-		sortedSet.Add(field, delta)
+		zset.Add(field, delta)
+		syncZSetEncodingAfterWrite(db, key, zset)
 		db.addAof(utils.ToCmdLine3("zincrby", args...))
 		return protocol.MakeBulkReply(args[1])
 	}
-	score := element.Score + delta
-	sortedSet.Add(field, score)
+	score := existingScore + delta
+	zset.Add(field, score)
+	syncZSetEncodingAfterWrite(db, key, zset)
 	bytes := []byte(strconv.FormatFloat(score, 'f', -1, 64))
 	db.addAof(utils.ToCmdLine3("zincrby", args...))
 	return protocol.MakeBulkReply(bytes)
@@ -650,11 +664,11 @@ func undoZIncr(db *DB, args [][]byte) []CmdLine {
 
 func execZLexCount(db *DB, args [][]byte) redis.Reply {
 	key := string(args[0])
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return protocol.MakeIntReply(0)
 	}
 
@@ -668,7 +682,7 @@ func execZLexCount(db *DB, args [][]byte) redis.Reply {
 		return protocol.MakeErrReply(err.Error())
 	}
 
-	count := sortedSet.RangeCount(min, max)
+	count := zset.RangeCount(min, max)
 
 	return protocol.MakeIntReply(count)
 }
@@ -683,11 +697,11 @@ func execZRangeByLex(db *DB, args [][]byte) redis.Reply {
 	}
 
 	key := string(args[0])
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return protocol.MakeIntReply(0)
 	}
 
@@ -721,7 +735,7 @@ func execZRangeByLex(db *DB, args [][]byte) redis.Reply {
 		}
 	}
 
-	elements := sortedSet.Range(min, max, offset, limitCnt, false)
+	elements := zset.Range(min, max, offset, limitCnt, false)
 	result := make([][]byte, 0, len(elements))
 	for _, ele := range elements {
 		result = append(result, []byte(ele.Member))
@@ -739,11 +753,11 @@ func execZRemRangeByLex(db *DB, args [][]byte) redis.Reply {
 	}
 
 	key := string(args[0])
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return protocol.MakeIntReply(0)
 	}
 
@@ -757,7 +771,7 @@ func execZRemRangeByLex(db *DB, args [][]byte) redis.Reply {
 		return protocol.MakeErrReply(err.Error())
 	}
 
-	count := sortedSet.RemoveRange(min, max)
+	count := zset.RemoveRange(min, max)
 
 	return protocol.MakeIntReply(count)
 }
@@ -772,11 +786,11 @@ func execZRevRangeByLex(db *DB, args [][]byte) redis.Reply {
 	}
 
 	key := string(args[0])
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return protocol.MakeIntReply(0)
 	}
 
@@ -810,7 +824,7 @@ func execZRevRangeByLex(db *DB, args [][]byte) redis.Reply {
 		}
 	}
 
-	elements := sortedSet.Range(min, max, offset, limitCnt, true)
+	elements := zset.Range(min, max, offset, limitCnt, true)
 	result := make([][]byte, 0, len(elements))
 	for _, ele := range elements {
 		result = append(result, []byte(ele.Member))
@@ -844,7 +858,7 @@ func execZScan(db *DB, args [][]byte) redis.Reply {
 	}
 	key := string(args[0])
 	// get entity
-	set, errReply := db.getAsSortedSet(key)
+	set, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
@@ -909,4 +923,17 @@ func init() {
 		attachCommandExtra([]string{redisFlagReadonly}, 1, 1, 1)
 	registerCommand("ZScan", execZScan, readFirstKey, nil, -2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly}, 1, 1, 1)
+}
+
+// syncZSetEncodingAfterWrite updates the Robj.Encoding to match the ZSet's
+// actual encoding after a write operation that may have triggered internal
+// conversion (e.g. listpack→skiplist).
+func syncZSetEncodingAfterWrite(db *DB, key string, zset *object.ZSet) {
+	entity, exists := db.GetEntity(key)
+	if !exists {
+		return
+	}
+	if robj, ok := entity.Data.(*object.Robj); ok {
+		robj.Encoding = zset.CurrentEncoding()
+	}
 }

@@ -42,6 +42,7 @@ func NewStorageEngine(cfg *config.ServerProperties) (iface.StorageEngine, error)
 	NormalizeBackends(cfg)
 	switch cfg.EngineBackend {
 	case EngineShardMap:
+		dict.SetEngine("shardmap")
 		return database.NewStandaloneServer(), nil
 	case EngineRedisDB:
 		dict.SetEngine("redisdb")

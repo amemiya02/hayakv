@@ -174,28 +174,39 @@ func (persister *Persister) generateRDB(ctx *RewriteCtx) error {
 					if !ok {
 						break
 					}
-					d := hash.GetAsDict()
 					h := make(map[string][]byte)
-					d.ForEach(func(key string, val interface{}) bool {
-						bytes, _ := val.([]byte)
-						h[key] = bytes
+					hash.ForEach(func(field string, val interface{}) bool {
+						switch v := val.(type) {
+						case []byte:
+							h[field] = v
+						case string:
+							h[field] = []byte(v)
+						}
 						return true
 					})
 					err = encoder.WriteHashMapObject(key, h, opts...)
 				case object.TypeZSet:
-					zset, ok := obj.Value().(*SortedSet.SortedSet)
-					if !ok {
-						break
-					}
-					var entries []*model.ZSetEntry
-					zset.ForEachByRank(int64(0), zset.Len(), true, func(element *SortedSet.Element) bool {
-						entries = append(entries, &model.ZSetEntry{
-							Member: element.Member,
-							Score:  element.Score,
+					if objZSet, ok := obj.Value().(*object.ZSet); ok {
+						var entries []*model.ZSetEntry
+						objZSet.ForEach(func(member string, score float64) bool {
+							entries = append(entries, &model.ZSetEntry{
+								Member: member,
+								Score:  score,
+							})
+							return true
 						})
-						return true
-					})
-					err = encoder.WriteZSetObject(key, entries, opts...)
+						err = encoder.WriteZSetObject(key, entries, opts...)
+					} else if zset, ok := obj.Value().(*SortedSet.SortedSet); ok {
+						var entries []*model.ZSetEntry
+						zset.ForEachByRank(int64(0), zset.Len(), true, func(element *SortedSet.Element) bool {
+							entries = append(entries, &model.ZSetEntry{
+								Member: element.Member,
+								Score:  element.Score,
+							})
+							return true
+						})
+						err = encoder.WriteZSetObject(key, entries, opts...)
+					}
 				}
 			case []byte:
 				err = encoder.WriteStringObject(key, obj, opts...)

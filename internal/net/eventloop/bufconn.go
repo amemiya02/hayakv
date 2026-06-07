@@ -43,6 +43,20 @@ func (c *bufConn) takeOut() []byte {
 	return out
 }
 
+// truncateTo discards everything in the buffer from offset onwards,
+// preserving bytes [0, offset). Used to selectively remove the last
+// reply buffered without wiping earlier pipeline replies.
+func (c *bufConn) truncateTo(offset int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(c.out) {
+		// Everything is already within [0, offset), so no truncation needed.
+		return
+	}
+	c.out = c.out[:offset]
+}
+
 // Read is a no-op — reading is done directly on the fd.
 func (c *bufConn) Read(b []byte) (int, error)         { return 0, nil }
 func (c *bufConn) Close() error                       { return nil }

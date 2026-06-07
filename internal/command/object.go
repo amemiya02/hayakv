@@ -39,7 +39,36 @@ func execObjectEncoding(db *DB, key string) redis.Reply {
 		return protocol.MakeBulkReply([]byte("go-native"))
 	}
 
+	// Sync Robj.Encoding with the internal object's actual encoding
+	// to avoid stale values after internal conversions (e.g. listpack→hashtable)
+	syncRobjEncoding(robj)
+
 	return protocol.MakeBulkReply([]byte(robj.EncodingName()))
+}
+
+// syncRobjEncoding updates robj.Encoding to match the internal object's
+// actual current encoding. Internal objects may self-convert (e.g. hash
+// listpack→hashtable when exceeding thresholds), but Robj.Encoding was
+// never updated, causing OBJECT ENCODING to report stale values.
+func syncRobjEncoding(robj *object.Robj) {
+	switch robj.Type {
+	case object.TypeHash:
+		if hash, ok := robj.Value().(*object.Hash); ok {
+			robj.Encoding = hash.CurrentEncoding()
+		}
+	case object.TypeList:
+		if list, ok := robj.Value().(*object.List); ok {
+			robj.Encoding = list.CurrentEncoding()
+		}
+	case object.TypeSet:
+		if set, ok := robj.Value().(*object.Set); ok {
+			robj.Encoding = set.CurrentEncoding()
+		}
+	case object.TypeZSet:
+		if zset, ok := robj.Value().(*object.ZSet); ok {
+			robj.Encoding = zset.CurrentEncoding()
+		}
+	}
 }
 
 func init() {

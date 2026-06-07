@@ -7,10 +7,9 @@ import (
 
 	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/datastruct/dict"
-	List "github.com/amemiya02/hayakv/internal/datastruct/list"
 	HashSet "github.com/amemiya02/hayakv/internal/datastruct/set"
-	SortedSet "github.com/amemiya02/hayakv/internal/datastruct/sortedset"
 	"github.com/amemiya02/hayakv/internal/iface/database"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/persist/aof"
 	"github.com/hdt3213/rdb/core"
 	rdb "github.com/hdt3213/rdb/parser"
@@ -46,7 +45,7 @@ func (server *Server) LoadRDB(dec *core.Decoder) error {
 			}
 		case rdb.ListType:
 			listObj := o.(*rdb.ListObject)
-			list := List.NewQuickList()
+			list := object.NewList()
 			for _, v := range listObj.Values {
 				list.Add(v)
 			}
@@ -73,7 +72,7 @@ func (server *Server) LoadRDB(dec *core.Decoder) error {
 			}
 		case rdb.ZSetType:
 			zsetObj := o.(*rdb.ZSetObject)
-			zSet := SortedSet.Make()
+			zSet := object.NewZSet()
 			for _, e := range zsetObj.Entries {
 				zSet.Add(e.Member, e.Score)
 			}

@@ -11,6 +11,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/lib/logger"
 	"github.com/amemiya02/hayakv/internal/lib/timewheel"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
+	"github.com/amemiya02/hayakv/internal/proto/resp3"
 )
 
 const (
@@ -102,10 +103,10 @@ func (db *DB) Exec(c redis.Connection, cmdLine [][]byte) redis.Reply {
 		return EnqueueCmd(c, cmdLine)
 	}
 
-	return db.execNormalCommand(cmdLine)
+	return db.execNormalCommand(c, cmdLine)
 }
 
-func (db *DB) execNormalCommand(cmdLine [][]byte) redis.Reply {
+func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Reply {
 	cmdName := strings.ToLower(string(cmdLine[0]))
 	cmd, ok := cmdTable[cmdName]
 	if !ok {
@@ -121,7 +122,15 @@ func (db *DB) execNormalCommand(cmdLine [][]byte) redis.Reply {
 	db.RWLocks(write, read)
 	defer db.RWUnLocks(write, read)
 	fun := cmd.executor
-	return fun(db, cmdLine[1:])
+	result := fun(db, cmdLine[1:])
+
+	// RESP3: convert HGETALL array reply to map
+	if c != nil && c.Protocol() == redis.RESP3 && cmdName == "hgetall" {
+		if mbr, ok := result.(*protocol.MultiBulkReply); ok {
+			return convertMultiBulkToMapReply(mbr)
+		}
+	}
+	return result
 }
 
 // execWithLock executes normal commands, invoker should provide locks
@@ -144,6 +153,21 @@ func validateArity(arity int, cmdArgs [][]byte) bool {
 		return argNum == arity
 	}
 	return argNum >= -arity
+}
+
+// convertMultiBulkToMapReply converts a flat MultiBulkReply with alternating
+// key-value pairs into a RESP3 MapReply (%-prefixed). Used by HGETALL when the
+// client is speaking RESP3.
+func convertMultiBulkToMapReply(mbr *protocol.MultiBulkReply) redis.Reply {
+	args := mbr.Args
+	if len(args)%2 != 0 {
+		return mbr // odd-length, leave as-is
+	}
+	pairs := make([]redis.Reply, len(args))
+	for i, b := range args {
+		pairs[i] = protocol.MakeBulkReply(b)
+	}
+	return resp3.MakeMapReply(pairs)
 }
 
 /* ---- Data Access ----- */

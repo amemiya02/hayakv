@@ -208,8 +208,8 @@ port %d
 dir %s
 databases 16
 net eventloop
-engine shardmap
-proto-max resp2
+engine redisdb
+proto-max resp3
 `, port, tmp)), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

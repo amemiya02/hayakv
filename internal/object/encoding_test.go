@@ -684,24 +684,24 @@ func TestListAddGet(t *testing.T) {
 	if !ok {
 		t.Fatal("expected to find value at index 0")
 	}
-	if string(val.(string)) != "value1" {
-		t.Fatalf("expected 'value1', got %q", string(val.(string)))
+	if string(val.([]byte)) != "value1" {
+		t.Fatalf("expected 'value1', got %q", val)
 	}
 
 	val, ok = l.Get(1)
 	if !ok {
 		t.Fatal("expected to find value at index 1")
 	}
-	if string(val.(string)) != "value2" {
-		t.Fatalf("expected 'value2', got %q", string(val.(string)))
+	if string(val.([]byte)) != "value2" {
+		t.Fatalf("expected 'value2', got %q", val)
 	}
 
 	val, ok = l.Get(2)
 	if !ok {
 		t.Fatal("expected to find value at index 2")
 	}
-	if string(val.(string)) != "value3" {
-		t.Fatalf("expected 'value3', got %q", string(val.(string)))
+	if string(val.([]byte)) != "value3" {
+		t.Fatalf("expected 'value3', got %q", val)
 	}
 
 	// Get out of bounds
@@ -739,7 +739,7 @@ func TestListForEach(t *testing.T) {
 	// Collect all values
 	var values []string
 	l.ForEach(func(i int, val interface{}) bool {
-		values = append(values, val.(string))
+		values = append(values, string(val.([]byte)))
 		return true
 	})
 

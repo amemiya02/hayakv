@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func (db *DB) getAsSet(key string) (*HashSet.Set, protocol.ErrorReply) {
+func (db *DB) getAsSet(key string) (*object.Set, protocol.ErrorReply) {
 	entity, exists := db.GetEntity(key)
 	if !exists {
 		return nil, nil
@@ -21,19 +21,37 @@ func (db *DB) getAsSet(key string) (*HashSet.Set, protocol.ErrorReply) {
 		if v.Type != object.TypeSet {
 			return nil, &protocol.WrongTypeErrReply{}
 		}
-		set, ok := v.Value().(*HashSet.Set)
+		set, ok := v.Value().(*object.Set)
 		if !ok {
-			return nil, &protocol.WrongTypeErrReply{}
+			// Legacy HashSet.Set — convert on read
+			legacySet, ok2 := v.Value().(*HashSet.Set)
+			if !ok2 {
+				return nil, &protocol.WrongTypeErrReply{}
+			}
+			newSet := object.NewSet()
+			legacySet.ForEach(func(member string) bool {
+				newSet.Add(member)
+				return true
+			})
+			v.Ptr = newSet
+			syncSetRobjEncoding(v, newSet)
+			return newSet, nil
 		}
 		return set, nil
 	case *HashSet.Set:
-		return v, nil
+		// Legacy entity without Robj — convert
+		newSet := object.NewSet()
+		v.ForEach(func(member string) bool {
+			newSet.Add(member)
+			return true
+		})
+		return newSet, nil
 	default:
 		return nil, &protocol.WrongTypeErrReply{}
 	}
 }
 
-func (db *DB) getOrInitSet(key string) (set *HashSet.Set, inited bool, errReply protocol.ErrorReply) {
+func (db *DB) getOrInitSet(key string) (set *object.Set, inited bool, errReply protocol.ErrorReply) {
 	entity, exists := db.GetEntity(key)
 	if exists {
 		switch v := entity.Data.(type) {
@@ -41,27 +59,51 @@ func (db *DB) getOrInitSet(key string) (set *HashSet.Set, inited bool, errReply 
 			if v.Type != object.TypeSet {
 				return nil, false, &protocol.WrongTypeErrReply{}
 			}
-			set, ok := v.Value().(*HashSet.Set)
+			set, ok := v.Value().(*object.Set)
 			if !ok {
-				return nil, false, &protocol.WrongTypeErrReply{}
+				// Legacy HashSet.Set stored in Robj — wrap for compatibility
+				legacySet, ok2 := v.Value().(*HashSet.Set)
+				if !ok2 {
+					return nil, false, &protocol.WrongTypeErrReply{}
+				}
+				// Convert legacy set to new encoding-layer Set
+				newSet := object.NewSet()
+				legacySet.ForEach(func(member string) bool {
+					newSet.Add(member)
+					return true
+				})
+				v.Ptr = newSet
+				syncSetRobjEncoding(v, newSet)
+				return newSet, false, nil
 			}
 			return set, false, nil
 		case *HashSet.Set:
-			return v, false, nil
+			// Legacy entity without Robj — convert
+			newSet := object.NewSet()
+			v.ForEach(func(member string) bool {
+				newSet.Add(member)
+				return true
+			})
+			return newSet, false, nil
 		default:
 			return nil, false, &protocol.WrongTypeErrReply{}
 		}
 	}
-	set = HashSet.Make()
+	set = object.NewSet()
 	robj := &object.Robj{
 		Type:     object.TypeSet,
-		Encoding: object.EncHashtable,
+		Encoding: object.EncIntset,
 		Ptr:      set,
 	}
 	db.PutEntity(key, &database.DataEntity{
 		Data: robj,
 	})
 	return set, true, nil
+}
+
+// syncSetRobjEncoding updates the Robj.Encoding to match the Set's actual encoding.
+func syncSetRobjEncoding(robj *object.Robj, set *object.Set) {
+	robj.Encoding = set.CurrentEncoding()
 }
 
 // execSAdd adds members into set
@@ -78,6 +120,8 @@ func execSAdd(db *DB, args [][]byte) redis.Reply {
 	for _, member := range members {
 		counter += set.Add(string(member))
 	}
+	// Sync encoding after potential internal conversion (intset→listpack→hashtable)
+	syncSetEncodingAfterWrite(db, key, set)
 	db.addAof(utils.ToCmdLine3("sadd", args...))
 	return protocol.MakeIntReply(int64(counter))
 }
@@ -206,7 +250,7 @@ func execSMembers(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeMultiBulkReply(arr)
 }
 
-func set2reply(set *HashSet.Set) redis.Reply {
+func set2reply(set *object.Set) redis.Reply {
 	arr := make([][]byte, set.Len())
 	i := 0
 	set.ForEach(func(member string) bool {
@@ -219,7 +263,7 @@ func set2reply(set *HashSet.Set) redis.Reply {
 
 // execSInter intersect multiple sets
 func execSInter(db *DB, args [][]byte) redis.Reply {
-	sets := make([]*HashSet.Set, 0, len(args))
+	sets := make([]*object.Set, 0, len(args))
 	for _, arg := range args {
 		key := string(arg)
 		set, errReply := db.getAsSet(key)
@@ -231,14 +275,14 @@ func execSInter(db *DB, args [][]byte) redis.Reply {
 		}
 		sets = append(sets, set)
 	}
-	result := HashSet.Intersect(sets...)
+	result := objectIntersect(sets...)
 	return set2reply(result)
 }
 
 // execSInterStore intersects multiple sets and store the result in a key
 func execSInterStore(db *DB, args [][]byte) redis.Reply {
 	dest := string(args[0])
-	sets := make([]*HashSet.Set, 0, len(args)-1)
+	sets := make([]*object.Set, 0, len(args)-1)
 	for i := 1; i < len(args); i++ {
 		key := string(args[i])
 		set, errReply := db.getAsSet(key)
@@ -250,10 +294,9 @@ func execSInterStore(db *DB, args [][]byte) redis.Reply {
 		}
 		sets = append(sets, set)
 	}
-	result := HashSet.Intersect(sets...)
-
+	result := objectIntersect(sets...)
 	db.PutEntity(dest, &database.DataEntity{
-		Data: &object.Robj{Type: object.TypeSet, Encoding: object.EncHashtable, Ptr: result},
+		Data: &object.Robj{Type: object.TypeSet, Encoding: result.CurrentEncoding(), Ptr: result},
 	})
 	db.addAof(utils.ToCmdLine3("sinterstore", args...))
 	return protocol.MakeIntReply(int64(result.Len()))
@@ -261,7 +304,7 @@ func execSInterStore(db *DB, args [][]byte) redis.Reply {
 
 // execSUnion adds multiple sets
 func execSUnion(db *DB, args [][]byte) redis.Reply {
-	sets := make([]*HashSet.Set, 0, len(args))
+	sets := make([]*object.Set, 0, len(args))
 	for _, arg := range args {
 		key := string(arg)
 		set, errReply := db.getAsSet(key)
@@ -270,14 +313,14 @@ func execSUnion(db *DB, args [][]byte) redis.Reply {
 		}
 		sets = append(sets, set)
 	}
-	result := HashSet.Union(sets...)
+	result := objectUnion(sets...)
 	return set2reply(result)
 }
 
 // execSUnionStore adds multiple sets and store the result in a key
 func execSUnionStore(db *DB, args [][]byte) redis.Reply {
 	dest := string(args[0])
-	sets := make([]*HashSet.Set, 0, len(args)-1)
+	sets := make([]*object.Set, 0, len(args)-1)
 	for i := 1; i < len(args); i++ {
 		key := string(args[i])
 		set, errReply := db.getAsSet(key)
@@ -286,14 +329,14 @@ func execSUnionStore(db *DB, args [][]byte) redis.Reply {
 		}
 		sets = append(sets, set)
 	}
-	result := HashSet.Union(sets...)
+	result := objectUnion(sets...)
 	db.Remove(dest) // clean ttl
 	if result.Len() == 0 {
 		return protocol.MakeIntReply(0)
 	}
 
 	db.PutEntity(dest, &database.DataEntity{
-		Data: &object.Robj{Type: object.TypeSet, Encoding: object.EncHashtable, Ptr: result},
+		Data: &object.Robj{Type: object.TypeSet, Encoding: result.CurrentEncoding(), Ptr: result},
 	})
 	db.addAof(utils.ToCmdLine3("sunionstore", args...))
 	return protocol.MakeIntReply(int64(result.Len()))
@@ -301,7 +344,7 @@ func execSUnionStore(db *DB, args [][]byte) redis.Reply {
 
 // execSDiff subtracts multiple sets
 func execSDiff(db *DB, args [][]byte) redis.Reply {
-	sets := make([]*HashSet.Set, 0, len(args))
+	sets := make([]*object.Set, 0, len(args))
 	for _, arg := range args {
 		key := string(arg)
 		set, errReply := db.getAsSet(key)
@@ -310,14 +353,14 @@ func execSDiff(db *DB, args [][]byte) redis.Reply {
 		}
 		sets = append(sets, set)
 	}
-	result := HashSet.Diff(sets...)
+	result := objectDiff(sets...)
 	return set2reply(result)
 }
 
 // execSDiffStore subtracts multiple sets and store the result in a key
 func execSDiffStore(db *DB, args [][]byte) redis.Reply {
 	dest := string(args[0])
-	sets := make([]*HashSet.Set, 0, len(args)-1)
+	sets := make([]*object.Set, 0, len(args)-1)
 	for i := 1; i < len(args); i++ {
 		key := string(args[i])
 		set, errReply := db.getAsSet(key)
@@ -326,13 +369,13 @@ func execSDiffStore(db *DB, args [][]byte) redis.Reply {
 		}
 		sets = append(sets, set)
 	}
-	result := HashSet.Diff(sets...)
+	result := objectDiff(sets...)
 	db.Remove(dest) // clean ttl
 	if result.Len() == 0 {
 		return protocol.MakeIntReply(0)
 	}
 	db.PutEntity(dest, &database.DataEntity{
-		Data: &object.Robj{Type: object.TypeSet, Encoding: object.EncHashtable, Ptr: result},
+		Data: &object.Robj{Type: object.TypeSet, Encoding: result.CurrentEncoding(), Ptr: result},
 	})
 	db.addAof(utils.ToCmdLine3("sdiffstore", args...))
 	return protocol.MakeIntReply(int64(result.Len()))
@@ -457,4 +500,72 @@ func init() {
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagRandom}, 1, 1, 1)
 	registerCommand("SScan", execSScan, readFirstKey, nil, -2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagSortForScript}, 1, 1, 1)
+}
+
+// objectIntersect intersects multiple *object.Set
+func objectIntersect(sets ...*object.Set) *object.Set {
+	result := object.NewSet()
+	if len(sets) == 0 {
+		return result
+	}
+	countMap := make(map[string]int)
+	for _, set := range sets {
+		set.ForEach(func(member string) bool {
+			countMap[member]++
+			return true
+		})
+	}
+	for k, v := range countMap {
+		if v == len(sets) {
+			result.Add(k)
+		}
+	}
+	return result
+}
+
+// objectUnion unions multiple *object.Set
+func objectUnion(sets ...*object.Set) *object.Set {
+	result := object.NewSet()
+	for _, set := range sets {
+		set.ForEach(func(member string) bool {
+			result.Add(member)
+			return true
+		})
+	}
+	return result
+}
+
+// objectDiff subtracts multiple *object.Set (first - rest)
+func objectDiff(sets ...*object.Set) *object.Set {
+	if len(sets) == 0 {
+		return object.NewSet()
+	}
+	result := object.NewSet()
+	sets[0].ForEach(func(member string) bool {
+		result.Add(member)
+		return true
+	})
+	for i := 1; i < len(sets); i++ {
+		sets[i].ForEach(func(member string) bool {
+			result.Remove(member)
+			return true
+		})
+		if result.Len() == 0 {
+			break
+		}
+	}
+	return result
+}
+
+// syncSetEncodingAfterWrite updates the Robj.Encoding to match the Set's
+// actual encoding after a write operation that may have triggered internal
+// conversion (e.g. intset→listpack→hashtable).
+func syncSetEncodingAfterWrite(db *DB, key string, set *object.Set) {
+	entity, exists := db.GetEntity(key)
+	if !exists {
+		return
+	}
+	if robj, ok := entity.Data.(*object.Robj); ok {
+		robj.Encoding = set.CurrentEncoding()
+	}
 }

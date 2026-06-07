@@ -9,6 +9,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/geohash"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
 
@@ -42,14 +43,14 @@ func execGeoAdd(db *DB, args [][]byte) redis.Reply {
 	}
 
 	// get or init entity
-	sortedSet, _, errReply := db.getOrInitSortedSet(key)
+	zset, _, errReply := db.getOrInitZSet(key)
 	if errReply != nil {
 		return errReply
 	}
 
 	i := 0
 	for _, e := range elements {
-		if sortedSet.Add(e.Member, e.Score) {
+		if zset.Add(e.Member, e.Score) {
 			i++
 		}
 	}
@@ -74,23 +75,23 @@ func execGeoPos(db *DB, args [][]byte) redis.Reply {
 		return protocol.MakeErrReply("ERR wrong number of arguments for 'geopos' command")
 	}
 	key := string(args[0])
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.NullBulkReply{}
 	}
 
 	positions := make([]redis.Reply, len(args)-1)
 	for i := 0; i < len(args)-1; i++ {
 		member := string(args[i+1])
-		elem, exists := sortedSet.Get(member)
+		score, exists := zset.Get(member)
 		if !exists {
 			positions[i] = &protocol.EmptyMultiBulkReply{}
 			continue
 		}
-		lat, lng := geohash.Decode(uint64(elem.Score))
+		lat, lng := geohash.Decode(uint64(score))
 		lngStr := strconv.FormatFloat(lng, 'f', -1, 64)
 		latStr := strconv.FormatFloat(lat, 'f', -1, 64)
 		positions[i] = protocol.MakeMultiBulkReply([][]byte{
@@ -107,22 +108,22 @@ func execGeoDist(db *DB, args [][]byte) redis.Reply {
 		return protocol.MakeErrReply("ERR wrong number of arguments for 'geodist' command")
 	}
 	key := string(args[0])
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.NullBulkReply{}
 	}
 
 	positions := make([][]float64, 2)
 	for i := 1; i < 3; i++ {
 		member := string(args[i])
-		elem, exists := sortedSet.Get(member)
+		score, exists := zset.Get(member)
 		if !exists {
 			return &protocol.NullBulkReply{}
 		}
-		lat, lng := geohash.Decode(uint64(elem.Score))
+		lat, lng := geohash.Decode(uint64(score))
 		positions[i-1] = []float64{lat, lng}
 	}
 	unit := "m"
@@ -149,23 +150,23 @@ func execGeoHash(db *DB, args [][]byte) redis.Reply {
 	}
 
 	key := string(args[0])
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.NullBulkReply{}
 	}
 
 	strs := make([][]byte, len(args)-1)
 	for i := 0; i < len(args)-1; i++ {
 		member := string(args[i+1])
-		elem, exists := sortedSet.Get(member)
+		score, exists := zset.Get(member)
 		if !exists {
 			strs[i] = (&protocol.EmptyMultiBulkReply{}).ToBytes()
 			continue
 		}
-		str := geohash.ToString(geohash.FromInt(uint64(elem.Score)))
+		str := geohash.ToString(geohash.FromInt(uint64(score)))
 		strs[i] = []byte(str)
 	}
 	return protocol.MakeMultiBulkReply(strs)
@@ -179,11 +180,11 @@ func execGeoRadius(db *DB, args [][]byte) redis.Reply {
 	}
 
 	key := string(args[0])
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.NullBulkReply{}
 	}
 
@@ -206,7 +207,7 @@ func execGeoRadius(db *DB, args [][]byte) redis.Reply {
 	} else {
 		return protocol.MakeErrReply("ERR unsupported unit provided. please use m, km")
 	}
-	return geoRadius0(sortedSet, lat, lng, radius)
+	return geoRadius0(zset, lat, lng, radius)
 }
 
 // execGeoRadiusByMember returns members within max distance of given member's location
@@ -217,20 +218,20 @@ func execGeoRadiusByMember(db *DB, args [][]byte) redis.Reply {
 	}
 
 	key := string(args[0])
-	sortedSet, errReply := db.getAsSortedSet(key)
+	zset, errReply := db.getAsZSet(key)
 	if errReply != nil {
 		return errReply
 	}
-	if sortedSet == nil {
+	if zset == nil {
 		return &protocol.NullBulkReply{}
 	}
 
 	member := string(args[1])
-	elem, ok := sortedSet.Get(member)
+	score, ok := zset.Get(member)
 	if !ok {
 		return &protocol.NullBulkReply{}
 	}
-	lat, lng := geohash.Decode(uint64(elem.Score))
+	lat, lng := geohash.Decode(uint64(score))
 
 	radius, err := strconv.ParseFloat(string(args[2]), 64)
 	if err != nil {
@@ -245,16 +246,16 @@ func execGeoRadiusByMember(db *DB, args [][]byte) redis.Reply {
 			return protocol.MakeErrReply("ERR unsupported unit provided. please use m, km")
 		}
 	}
-	return geoRadius0(sortedSet, lat, lng, radius)
+	return geoRadius0(zset, lat, lng, radius)
 }
 
-func geoRadius0(sortedSet *sortedset.SortedSet, lat float64, lng float64, radius float64) redis.Reply {
+func geoRadius0(zset *object.ZSet, lat float64, lng float64, radius float64) redis.Reply {
 	areas := geohash.GetNeighbours(lat, lng, radius)
 	members := make([][]byte, 0)
 	for _, area := range areas {
 		lower := &sortedset.ScoreBorder{Value: float64(area[0])}
 		upper := &sortedset.ScoreBorder{Value: float64(area[1])}
-		elements := sortedSet.Range(lower, upper, 0, -1, true)
+		elements := zset.Range(lower, upper, 0, -1, true)
 		for _, elem := range elements {
 			members = append(members, []byte(elem.Member))
 		}

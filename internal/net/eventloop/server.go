@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/amemiya02/hayakv/internal/iface"
 	"github.com/amemiya02/hayakv/internal/lib/logger"
@@ -107,6 +108,9 @@ func (s *Server) Run(ctx context.Context, addr string, handler iface.NetHandler)
 				s.flush(c)
 			}
 		}
+
+		// Timeout check: expire blocked clients whose deadline has passed.
+		s.expireBlockedClients()
 	}
 }
 
@@ -208,6 +212,13 @@ func (s *Server) onReadable(c *client) {
 	c.queryBuf = c.queryBuf[consumed:]
 
 	for _, cmdLine := range cmds {
+		cmdName := strings.ToLower(string(cmdLine[0]))
+
+		// Snapshot buffer offset before writing the reply, so that a
+		// blocking null can be removed without clobbering earlier
+		// pipeline replies (e.g. PING -> BLPOP must keep PONG).
+		preLen := len(c.bc.out)
+
 		reply := s.engine.Exec(c.conn, cmdLine)
 		if reply != nil {
 			encoded := s.codec.Encode(reply, c.conn.Protocol())
@@ -218,12 +229,14 @@ func (s *Server) onReadable(c *client) {
 
 		// Blocking command integration: if BLPOP/BRPOP returned null
 		// (empty list), register the client as a waiter.
-		cmdName := strings.ToLower(string(cmdLine[0]))
 		if isBlockCommand(cmdName) && reply != nil && isNullReply(reply) {
-			// Remove the null reply we just buffered — client will wait.
-			c.bc.takeOut()
+			// Remove only the null reply we just buffered, keeping
+			// any earlier pipeline replies intact.
+			c.bc.truncateTo(preLen)
 			keys := extractBlockKeys(cmdLine)
 			c.blockKeys = keys
+			c.blockCmd = cmdName
+			c.blockDeadline = extractBlockDeadline(cmdLine)
 			s.blocks.block(c, keys)
 			break // stop processing further pipelined commands
 		}
@@ -359,6 +372,19 @@ func extractBlockKeys(cmdLine [][]byte) []string {
 	return keys
 }
 
+// extractBlockDeadline parses the timeout argument and returns a monotonic
+// deadline in nanoseconds. Returns 0 if timeout is 0 (block indefinitely).
+func extractBlockDeadline(cmdLine [][]byte) int64 {
+	if len(cmdLine) < 3 {
+		return 0
+	}
+	timeoutSec, err := strconv.ParseFloat(string(cmdLine[len(cmdLine)-1]), 64)
+	if err != nil || timeoutSec <= 0 {
+		return 0
+	}
+	return time.Now().UnixNano() + int64(timeoutSec*1e9)
+}
+
 // wakeBlockedClients checks if any client is blocked on pushKey and retries
 // their BLPOP/BRPOP. If the list now has elements, the client gets a reply
 // and is unblocked.
@@ -375,7 +401,7 @@ func (s *Server) wakeBlockedClients(pushKey string) {
 		// Re-issue the blocking command. If the list now has elements,
 		// the engine will return a real reply.
 		blockCmd := make([][]byte, 0, len(c.blockKeys)+2)
-		blockCmd = append(blockCmd, []byte("BLPOP"))
+		blockCmd = append(blockCmd, []byte(c.blockCmd))
 		for _, k := range c.blockKeys {
 			blockCmd = append(blockCmd, []byte(k))
 		}
@@ -390,8 +416,40 @@ func (s *Server) wakeBlockedClients(pushKey string) {
 			}
 			s.blocks.unblock(c)
 			c.blockKeys = nil
+			c.blockCmd = ""
 			s.flush(c)
 		}
 		// If still null, leave the client blocked.
 	}
+}
+
+// expireBlockedClients scans all clients and unblocks any whose timeout has
+// expired, sending a null multi-bulk reply (identical to Redis timeout behavior).
+func (s *Server) expireBlockedClients() {
+	now := time.Now().UnixNano()
+	for _, c := range s.clients {
+		if c.blockKeys == nil || c.blockDeadline == 0 {
+			continue
+		}
+		if now >= c.blockDeadline {
+			// Timeout expired — send null multi-bulk reply
+			nullReply := s.codec.Encode(&protocolNullMultiBulk{}, c.conn.Protocol())
+			if len(nullReply) > 0 {
+				c.bc.Write(nullReply)
+			}
+			s.blocks.unblock(c)
+			c.blockKeys = nil
+			c.blockCmd = ""
+			c.blockDeadline = 0
+			s.flush(c)
+		}
+	}
+}
+
+// protocolNullMultiBulk represents a RESP null array (*-1\r\n), used as the
+// timeout reply for BLPOP/BRPOP.
+type protocolNullMultiBulk struct{}
+
+func (r *protocolNullMultiBulk) ToBytes() []byte {
+	return []byte("*-1\r\n")
 }

@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	List "github.com/amemiya02/hayakv/internal/datastruct/list"
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
@@ -13,7 +12,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
 
-func (db *DB) getAsList(key string) (List.List, protocol.ErrorReply) {
+func (db *DB) getAsList(key string) (*object.List, protocol.ErrorReply) {
 	entity, ok := db.GetEntity(key)
 	if !ok {
 		return nil, nil
@@ -23,19 +22,19 @@ func (db *DB) getAsList(key string) (List.List, protocol.ErrorReply) {
 		if v.Type != object.TypeList {
 			return nil, &protocol.WrongTypeErrReply{}
 		}
-		list, ok := v.Value().(List.List)
+		list, ok := v.Value().(*object.List)
 		if !ok {
 			return nil, &protocol.WrongTypeErrReply{}
 		}
 		return list, nil
-	case List.List:
+	case *object.List:
 		return v, nil
 	default:
 		return nil, &protocol.WrongTypeErrReply{}
 	}
 }
 
-func (db *DB) getOrInitList(key string) (list List.List, isNew bool, errReply protocol.ErrorReply) {
+func (db *DB) getOrInitList(key string) (list *object.List, isNew bool, errReply protocol.ErrorReply) {
 	entity, exists := db.GetEntity(key)
 	if exists {
 		switch v := entity.Data.(type) {
@@ -43,21 +42,21 @@ func (db *DB) getOrInitList(key string) (list List.List, isNew bool, errReply pr
 			if v.Type != object.TypeList {
 				return nil, false, &protocol.WrongTypeErrReply{}
 			}
-			list, ok := v.Value().(List.List)
+			list, ok := v.Value().(*object.List)
 			if !ok {
 				return nil, false, &protocol.WrongTypeErrReply{}
 			}
 			return list, false, nil
-		case List.List:
+		case *object.List:
 			return v, false, nil
 		default:
 			return nil, false, &protocol.WrongTypeErrReply{}
 		}
 	}
-	list = List.NewQuickList()
+	list = object.NewList()
 	robj := &object.Robj{
 		Type:     object.TypeList,
-		Encoding: object.EncQuicklist,
+		Encoding: object.EncListpack,
 		Ptr:      list,
 	}
 	db.PutEntity(key, &database.DataEntity{
@@ -94,7 +93,8 @@ func execLIndex(db *DB, args [][]byte) redis.Reply {
 		return &protocol.NullBulkReply{}
 	}
 
-	val, _ := list.Get(index).([]byte)
+	raw, _ := list.Get(index)
+	val, _ := raw.([]byte)
 	return protocol.MakeBulkReply(val)
 }
 
@@ -187,7 +187,8 @@ func undoLPop(db *DB, args [][]byte) []CmdLine {
 		cmd = append(cmd, elements...)
 		return []CmdLine{cmd}
 	}
-	element, _ := list.Get(0).([]byte)
+	raw, _ := list.Get(0)
+	element, _ := raw.([]byte)
 	return []CmdLine{
 		{
 			lPushCmd,
@@ -406,7 +407,8 @@ func undoLSet(db *DB, args [][]byte) []CmdLine {
 	} else if index >= size {
 		return nil
 	}
-	value, _ := list.Get(index).([]byte)
+	raw, _ := list.Get(index)
+	value, _ := raw.([]byte)
 	return []CmdLine{
 		{
 			[]byte("LSET"),
@@ -489,7 +491,8 @@ func undoRPop(db *DB, args [][]byte) []CmdLine {
 		cmd = append(cmd, elements...)
 		return []CmdLine{cmd}
 	}
-	element, _ := list.Get(list.Len() - 1).([]byte)
+	raw, _ := list.Get(list.Len() - 1)
+	element, _ := raw.([]byte)
 	return []CmdLine{
 		{
 			rPushCmd,
@@ -547,7 +550,8 @@ func undoRPopLPush(db *DB, args [][]byte) []CmdLine {
 	if list == nil || list.Len() == 0 {
 		return nil
 	}
-	element, _ := list.Get(list.Len() - 1).([]byte)
+	raw, _ := list.Get(list.Len() - 1)
+	element, _ := raw.([]byte)
 	return []CmdLine{
 		{
 			rPushCmd,
@@ -665,6 +669,64 @@ func execLTrim(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeOkReply()
 }
 
+func prepareBLPop(args [][]byte) ([]string, []string) {
+	keys := make([]string, len(args)-1)
+	for i := 0; i < len(args)-1; i++ {
+		keys[i] = string(args[i])
+	}
+	return keys, nil
+}
+
+// execBLPop pops the first element from the left of the first non-empty list among the given keys
+func execBLPop(db *DB, args [][]byte) redis.Reply {
+	keys := args[:len(args)-1]
+	// timeout := string(args[len(args)-1]) // parsed but not used here; eventloop handles blocking
+
+	for _, arg := range keys {
+		key := string(arg)
+		list, errReply := db.getAsList(key)
+		if errReply != nil {
+			return errReply
+		}
+		if list != nil && list.Len() > 0 {
+			val, _ := list.Remove(0).([]byte)
+			if list.Len() == 0 {
+				db.Remove(key)
+			}
+			db.addAof(utils.ToCmdLine3("blpop", args...))
+			return protocol.MakeMultiBulkReply([][]byte{
+				[]byte(key), val,
+			})
+		}
+	}
+	// All lists empty — return null to trigger blocking
+	return &protocol.NullBulkReply{}
+}
+
+// execBRPop pops the first element from the right of the first non-empty list among the given keys
+func execBRPop(db *DB, args [][]byte) redis.Reply {
+	keys := args[:len(args)-1]
+
+	for _, arg := range keys {
+		key := string(arg)
+		list, errReply := db.getAsList(key)
+		if errReply != nil {
+			return errReply
+		}
+		if list != nil && list.Len() > 0 {
+			val, _ := list.RemoveLast().([]byte)
+			if list.Len() == 0 {
+				db.Remove(key)
+			}
+			db.addAof(utils.ToCmdLine3("brpop", args...))
+			return protocol.MakeMultiBulkReply([][]byte{
+				[]byte(key), val,
+			})
+		}
+	}
+	return &protocol.NullBulkReply{}
+}
+
 func execLInsert(db *DB, args [][]byte) redis.Reply {
 	n := len(args)
 	if n != 4 {
@@ -738,4 +800,8 @@ func init() {
 		attachCommandExtra([]string{redisFlagWrite}, 1, 1, 1)
 	registerCommand("LInsert", execLInsert, writeFirstKey, rollbackFirstKey, 5, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM}, 1, 1, 1)
+	registerCommand("BLPop", execBLPop, prepareBLPop, nil, -3, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, -2, 1)
+	registerCommand("BRPop", execBRPop, prepareBLPop, nil, -3, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, -2, 1)
 }

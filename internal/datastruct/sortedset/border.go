@@ -26,6 +26,13 @@ type Border interface {
 	getValue() interface{}
 	getExclude() bool
 	isIntersected(max Border) bool
+	// Less returns true if the element is greater than the border's lower bound.
+	// Exported so that cross-package consumers (e.g. object.ZSet listpack path)
+	// can perform border checks without forcing skiplist conversion.
+	Less(element *Element) bool
+	// Greater returns true if the element is less than the border's upper bound.
+	// Exported so that cross-package consumers can perform border checks.
+	Greater(element *Element) bool
 }
 
 // ScoreBorder represents range of a float value, including: <, <=, >, >=, +inf, -inf
@@ -69,6 +76,16 @@ func (border *ScoreBorder) getValue() interface{} {
 
 func (border *ScoreBorder) getExclude() bool {
 	return border.Exclude
+}
+
+// Less is the exported version of less for cross-package use.
+func (border *ScoreBorder) Less(element *Element) bool {
+	return border.less(element)
+}
+
+// Greater is the exported version of greater for cross-package use.
+func (border *ScoreBorder) Greater(element *Element) bool {
+	return border.greater(element)
 }
 
 var scorePositiveInfBorder = &ScoreBorder{
@@ -156,6 +173,16 @@ func (border *LexBorder) getValue() interface{} {
 
 func (border *LexBorder) getExclude() bool {
 	return border.Exclude
+}
+
+// Less is the exported version of less for cross-package use.
+func (border *LexBorder) Less(element *Element) bool {
+	return border.less(element)
+}
+
+// Greater is the exported version of greater for cross-package use.
+func (border *LexBorder) Greater(element *Element) bool {
+	return border.greater(element)
 }
 
 var lexPositiveInfBorder = &LexBorder{

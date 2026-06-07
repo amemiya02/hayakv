@@ -110,6 +110,7 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 	results := make([]redis.Reply, 0, len(cmdLines))
 	aborted := false
 	undoCmdLines := make([][]CmdLine, 0, len(cmdLines))
+	isRESP3 := conn != nil && conn.Protocol() == redis.RESP3
 	for _, cmdLine := range cmdLines {
 		undoCmdLines = append(undoCmdLines, db.GetUndoLogs(cmdLine))
 		result := db.execWithLock(cmdLine)
@@ -118,6 +119,15 @@ func (db *DB) ExecMulti(conn redis.Connection, watching map[string]uint32, cmdLi
 			// don't rollback failed commands
 			undoCmdLines = undoCmdLines[:len(undoCmdLines)-1]
 			break
+		}
+		// RESP3: convert HGETALL array reply to map inside MULTI/EXEC
+		if isRESP3 {
+			cmdName := strings.ToLower(string(cmdLine[0]))
+			if cmdName == "hgetall" {
+				if mbr, ok := result.(*protocol.MultiBulkReply); ok {
+					result = convertMultiBulkToMapReply(mbr)
+				}
+			}
 		}
 		results = append(results, result)
 	}
