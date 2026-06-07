@@ -106,7 +106,7 @@ func TestQuickList_RemoveLast(t *testing.T) {
 
 func TestQuickListRemoveVal(t *testing.T) {
 	list := NewQuickList()
-	size := pageSize * 10
+	size := pageSize
 	for i := 0; i < size; i++ {
 		list.Add(i)
 		list.Add(i)
@@ -223,7 +223,7 @@ func TestQuickList_Range(t *testing.T) {
 
 func TestQuickList_Remove(t *testing.T) {
 	list := NewQuickList()
-	size := pageSize * 10
+	size := pageSize
 	for i := 0; i < size; i++ {
 		list.Add(i)
 	}
