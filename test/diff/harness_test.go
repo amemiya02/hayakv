@@ -262,6 +262,71 @@ func startRedis8(t *testing.T) (string, func()) {
 	}
 }
 
+// startHayakvAuth starts hayakv with requirepass set.
+func startHayakvAuth(t *testing.T, password string) (string, func()) {
+	return startHayakvExtraConfig(t, "requirepass "+password+"\n")
+}
+
+// startRedis8Auth starts a Redis 8 instance with requirepass set.
+// It configures authentication on whichever Redis backend is available
+// (external via HAYAKV_DIFF_REDIS_ADDR or Docker).
+func startRedis8Auth(t *testing.T, password string) (string, func()) {
+	t.Helper()
+	if addr := os.Getenv("HAYAKV_DIFF_REDIS_ADDR"); addr != "" {
+		waitForPing(t, addr)
+		// Set password on external Redis and reset on teardown
+		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err != nil {
+			t.Fatalf("dial %s for auth setup: %v", addr, err)
+		}
+		reader := bufio.NewReader(conn)
+		// Capture current password so we can restore it
+		_, _ = conn.Write(encodeCommand([]string{"CONFIG", "GET", "requirepass"}))
+		oldReply, _ := readReply(reader)
+		_, _ = conn.Write(encodeCommand([]string{"CONFIG", "SET", "requirepass", password}))
+		_, _ = readReply(reader)
+		_ = conn.Close()
+		return addr, func() {
+			// Restore old password (best-effort)
+			c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+			if err == nil {
+				_, _ = c.Write(encodeCommand([]string{"AUTH", password}))
+				r := bufio.NewReader(c)
+				_, _ = readReply(r)
+				_, _ = c.Write(append([]byte("*3\r\n$3\r\nCONFIG\r\n$3\r\nSET\r\n"), oldReply...))
+				_, _ = readReply(r)
+				_ = c.Close()
+			}
+		}
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not installed; set HAYAKV_DIFF_REDIS_ADDR to test against an external Redis 8")
+	}
+	infoCtx, infoCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer infoCancel()
+	if err := exec.CommandContext(infoCtx, "docker", "info").Run(); err != nil {
+		t.Skip("docker daemon not reachable; set HAYAKV_DIFF_REDIS_ADDR or start Docker")
+	}
+	port := freePort(t)
+	name := fmt.Sprintf("hayakv-redis8-auth-%d", time.Now().UnixNano())
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "--name", name,
+		"-p", fmt.Sprintf("%d:6379", port),
+		"redis:8", "redis-server", "--save", "", "--appendonly", "no",
+		"--requirepass", password)
+	if err := cmd.Start(); err != nil {
+		cancel()
+		t.Fatalf("start redis:8 with auth: %v", err)
+	}
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	waitForPing(t, addr)
+	return addr, func() {
+		_ = exec.Command("docker", "rm", "-f", name).Run()
+		_ = cmd.Wait()
+		cancel()
+	}
+}
+
 func runScenario(t *testing.T, addr string, scenario Scenario) [][]byte {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
@@ -289,6 +354,68 @@ func runScenario(t *testing.T, addr string, scenario Scenario) [][]byte {
 		replies = append(replies, reply)
 	}
 	return replies
+}
+
+// ConnStep represents a single step on a specific connection in a multi-connection scenario.
+type ConnStep struct {
+	Conn int // connection index (0-based)
+	Args []string
+}
+
+// MultiConnScenario describes a test that needs multiple simultaneous connections.
+type MultiConnScenario struct {
+	Name  string
+	Conns int // number of connections to open
+	Steps []ConnStep
+}
+
+// runScenarioMultiConn executes a scenario using multiple connections.
+// It opens Conns connections, FLUSHALLs on conn 0, then executes each step
+// on the specified connection, collecting replies.
+func runScenarioMultiConn(t *testing.T, addr string, sc MultiConnScenario) [][]byte {
+	t.Helper()
+	conns := make([]net.Conn, sc.Conns)
+	readers := make([]*bufio.Reader, sc.Conns)
+	for i := range conns {
+		c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err != nil {
+			t.Fatalf("dial %s: %v", addr, err)
+		}
+		defer c.Close()
+		conns[i], readers[i] = c, bufio.NewReader(c)
+	}
+	_, _ = conns[0].Write(encodeCommand([]string{"FLUSHALL"}))
+	_, _ = readReply(readers[0])
+	out := make([][]byte, 0, len(sc.Steps))
+	for _, st := range sc.Steps {
+		if _, err := conns[st.Conn].Write(encodeCommand(st.Args)); err != nil {
+			t.Fatalf("write %v: %v", st.Args, err)
+		}
+		reply, err := readReply(readers[st.Conn])
+		if err != nil {
+			t.Fatalf("read %v: %v", st.Args, err)
+		}
+		out = append(out, reply)
+	}
+	return out
+}
+
+// assertReplyEqual compares hayakv and redis replies byte-for-byte,
+// applying per-command Normalize hooks.
+func assertReplyEqual(t *testing.T, sc Scenario, h, r [][]byte) {
+	t.Helper()
+	if len(h) != len(r) {
+		t.Fatalf("%s reply count h=%d r=%d", sc.Name, len(h), len(r))
+	}
+	for i := range h {
+		hi, ri := h[i], r[i]
+		if fn := sc.Commands[i].Normalize; fn != nil {
+			hi, ri = fn(hi), fn(ri)
+		}
+		if !bytes.Equal(hi, ri) {
+			t.Fatalf("cmd %v\nhayakv: %q\nredis:  %q", sc.Commands[i].Args, hi, ri)
+		}
+	}
 }
 
 func TestDifferentialRESP3(t *testing.T) {
