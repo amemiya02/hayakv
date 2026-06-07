@@ -87,6 +87,19 @@ func (ce *ClusterEngine) Exec(c iredis.Connection, cmdLine iface.CmdLine) iredis
 func (ce *ClusterEngine) AfterClientClose(c iredis.Connection) { ce.inner.AfterClientClose(c) }
 func (ce *ClusterEngine) Close()                               { ce.inner.Close() }
 
+// NewClusterEngineFromConfig builds a ClusterEngine, generating or reloading the
+// node identity/slot map from confPath.
+func NewClusterEngineFromConfig(inner iface.StorageEngine, ip string, port int, confPath string) (*ClusterEngine, error) {
+	state := newClusterState(ip, port, confPath)
+	if err := state.load(); err != nil {
+		return nil, err
+	}
+	if err := state.save(); err != nil { // ensure the file exists with our identity
+		return nil, err
+	}
+	return NewClusterEngine(inner, state), nil
+}
+
 // maybeAsk is completed in Task 6. Returning nil means "fall through to MOVED".
 func (ce *ClusterEngine) maybeAsk(c iredis.Connection, slot uint16, cmdLine iface.CmdLine) iredis.Reply {
 	return nil

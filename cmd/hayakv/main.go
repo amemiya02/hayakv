@@ -69,6 +69,14 @@ func main() {
 		return
 	}
 
+	engine, err = server.MaybeWrapCluster(config.Properties, engine)
+	if err != nil {
+		msg := fmt.Sprintf("configure cluster failed: %v", err)
+		logger.Errorf("%s", msg)
+		fmt.Fprintln(os.Stderr, msg)
+		return
+	}
+
 	netServer, err := server.NewNetServerWithEngine(config.Properties, engine)
 	if err != nil {
 		msg := fmt.Sprintf("configure net server failed: %v", err)

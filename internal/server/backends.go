@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/amemiya02/hayakv/config"
@@ -12,6 +13,7 @@ import (
 	goroutinenet "github.com/amemiya02/hayakv/internal/net/goroutine"
 	"github.com/amemiya02/hayakv/internal/proto/resp2"
 	"github.com/amemiya02/hayakv/internal/proto/resp3"
+	"github.com/amemiya02/hayakv/internal/rediscluster"
 )
 
 const (
@@ -21,6 +23,7 @@ const (
 	EngineRedisDB  = "redisdb"
 	ProtoRESP2     = "resp2"
 	ProtoRESP3     = "resp3"
+	ClusterModeRedis = "redis"
 )
 
 func NormalizeBackends(cfg *config.ServerProperties) {
@@ -91,4 +94,35 @@ func NewNetServerWithEngine(cfg *config.ServerProperties, engine iface.StorageEn
 	default:
 		return nil, fmt.Errorf("unknown net backend %q", cfg.NetBackend)
 	}
+}
+
+// MaybeWrapCluster returns engine wrapped in a Redis Cluster redirection decorator
+// when cluster-enable=yes AND cluster-mode=redis; otherwise it returns engine
+// unchanged (the legacy raft proxy in internal/cluster is selected elsewhere, by
+// main.go, and is unaffected).
+func MaybeWrapCluster(cfg *config.ServerProperties, engine iface.StorageEngine) (iface.StorageEngine, error) {
+	if !cfg.ClusterEnable || strings.ToLower(cfg.ClusterMode) != ClusterModeRedis {
+		return engine, nil
+	}
+	confName := cfg.ClusterConfigFile
+	if strings.TrimSpace(confName) == "" {
+		confName = "nodes.conf"
+	}
+	confPath := confName
+	if !filepath.IsAbs(confPath) {
+		dir := cfg.Dir
+		if dir == "" {
+			dir = "."
+		}
+		confPath = filepath.Join(dir, confName)
+	}
+	ip := cfg.AnnounceHost
+	if ip == "" {
+		ip = cfg.Bind
+	}
+	ce, err := rediscluster.NewClusterEngineFromConfig(engine, ip, cfg.Port, confPath)
+	if err != nil {
+		return nil, err
+	}
+	return ce, nil
 }
