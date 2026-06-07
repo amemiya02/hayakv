@@ -491,3 +491,81 @@ func TestInfoReplicationFields(t *testing.T) {
 	}
 	t.Fatalf("master never listed slave0:\n%s", master.Info(ctx, "replication").Val())
 }
+
+// redisServerBin returns the path to a real redis-server binary, or skips the
+// test when HAYAKV_REPL_REDIS_BIN is unset.
+func redisServerBin(t *testing.T) string {
+	t.Helper()
+	bin := os.Getenv("HAYAKV_REPL_REDIS_BIN")
+	if bin == "" {
+		t.Skip("set HAYAKV_REPL_REDIS_BIN=/path/to/redis-server to run interop tests")
+	}
+	return bin
+}
+
+// startRealRedis launches a real redis-server process on a free port and
+// returns its address and a cleanup function.
+func startRealRedis(t *testing.T, extraArgs ...string) (addr string, stop func()) {
+	t.Helper()
+	bin := redisServerBin(t)
+	port := freePort(t)
+	addr = fmt.Sprintf("127.0.0.1:%d", port)
+	args := append([]string{"--port", fmt.Sprintf("%d", port), "--save", "", "--appendonly", "no"}, extraArgs...)
+	cmd := exec.Command(bin, args...)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start redis-server: %v", err)
+	}
+	waitForRedis(t, addr)
+	return addr, func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	}
+}
+
+// TestInteropHayakvReplicaOfRealRedis verifies a hayakv replica can follow a
+// real redis-server master.
+func TestInteropHayakvReplicaOfRealRedis(t *testing.T) {
+	masterAddr, stopMaster := startRealRedis(t)
+	defer stopMaster()
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	if err := master.Set(ctx, "ik", "iv", 0).Err(); err != nil {
+		t.Fatalf("master SET: %v", err)
+	}
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	pollGet(t, replica, "ik", "iv", 20*time.Second)
+}
+
+// TestInteropRealRedisReplicaOfHayakv verifies a real redis-server can
+// replicate from a hayakv master.
+func TestInteropRealRedisReplicaOfHayakv(t *testing.T) {
+	_ = redisServerBin(t) // skip early if not configured
+	masterAddr, stopMaster := startHayakvRepl(t, "")
+	defer stopMaster()
+	mhost, mport := splitAddr(t, masterAddr)
+	replicaAddr, stopReplica := startRealRedis(t, "--replicaof", mhost, mport)
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	if err := master.Set(ctx, "rk", "rv", 0).Err(); err != nil {
+		t.Fatalf("master SET: %v", err)
+	}
+	pollGet(t, replica, "rk", "rv", 20*time.Second)
+}
