@@ -41,6 +41,9 @@ type Server struct {
 
 	// slow log record
 	slogLogger *SlowLogger
+
+	// serverCronDone signals the serverCron goroutine to stop on Close().
+	serverCronDone chan struct{}
 }
 
 func fileExists(filename string) bool {
@@ -242,6 +245,10 @@ func (server *Server) AfterClientClose(c redis.Connection) {
 
 // Close graceful shutdown database
 func (server *Server) Close() {
+	// stop server cron
+	if server.serverCronDone != nil {
+		close(server.serverCronDone)
+	}
 	// stop slaveStatus first
 	server.slaveStatus.close()
 	if server.persister != nil {
@@ -468,13 +475,19 @@ func (server *Server) startReplCron() {
 // all databases. Separate from the 10s startReplCron. Mirrors Redis serverCron's
 // databasesCron -> activeExpireCycle.
 func (server *Server) startServerCron() {
-	go func(mdb *Server) {
+	server.serverCronDone = make(chan struct{})
+	go func(mdb *Server, done <-chan struct{}) {
 		ticker := time.NewTicker(serverCronPeriod())
 		defer ticker.Stop()
-		for range ticker.C {
-			mdb.activeExpireAllDBs()
+		for {
+			select {
+			case <-ticker.C:
+				mdb.activeExpireAllDBs()
+			case <-done:
+				return
+			}
 		}
-	}(server)
+	}(server, server.serverCronDone)
 }
 
 // activeExpireAllDBs runs one active-expire pass over every database.
