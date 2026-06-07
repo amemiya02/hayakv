@@ -17,6 +17,9 @@ import (
 
 // loadRdbFile loads rdb file from disk
 func (server *Server) loadRdbFile() error {
+	if config.Properties.RdbImpl == "faithful" {
+		return server.loadFaithfulRDB(config.Properties.RDBFilename)
+	}
 	rdbFile, err := os.Open(config.Properties.RDBFilename)
 	if err != nil {
 		return fmt.Errorf("open rdb file failed: %w", err)

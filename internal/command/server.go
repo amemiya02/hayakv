@@ -387,7 +387,12 @@ func SaveRDB(db *Server, args [][]byte) redis.Reply {
 	if rdbFilename == "" {
 		rdbFilename = "dump.rdb"
 	}
-	err := db.persister.GenerateRDB(rdbFilename)
+	var err error
+	if config.Properties.RdbImpl == "faithful" {
+		err = db.saveFaithfulRDB(rdbFilename)
+	} else {
+		err = db.persister.GenerateRDB(rdbFilename)
+	}
 	if err != nil {
 		return protocol.MakeErrReply(err.Error())
 	}

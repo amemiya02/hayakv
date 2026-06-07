@@ -36,6 +36,7 @@ type ServerProperties struct {
 	RequirePass       string `cfg:"requirepass"`
 	Databases         int    `cfg:"databases"`
 	RDBFilename       string `cfg:"dbfilename"`
+	RdbImpl           string `cfg:"rdb-impl"` // "faithful" (own codec) or "library" (hdt3213/rdb)
 	MasterAuth        string `cfg:"masterauth"`
 	SlaveAnnouncePort int    `cfg:"slave-announce-port"`
 	SlaveAnnounceIP   string `cfg:"slave-announce-ip"`
@@ -126,6 +127,7 @@ func init() {
 		NetBackend:    "goroutine",
 		EngineBackend: "shardmap",
 		ProtoMax:      "resp2",
+		RdbImpl:       "library",
 
 		ReplBacklogSize:  1024 * 1024, // 1MB, Redis default
 		ReplDisklessSync: false,
