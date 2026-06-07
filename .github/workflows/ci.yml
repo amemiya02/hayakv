@@ -45,7 +45,12 @@ jobs:
         run: go vet ./...
 
       - name: Race tests
-        run: go test -race -count=1 ./config ./internal/datastruct/... ./internal/proto/... ./internal/net/goroutine ./internal/net/eventloop ./internal/server ./internal/iface ./internal/command ./cmd/hayakv -timeout 10m
+        run: go test -race -count=1 ./config ./internal/datastruct/... ./internal/proto/... ./internal/net/goroutine ./internal/net/eventloop ./internal/server ./internal/iface ./cmd/hayakv -timeout 10m
+
+      - name: Command race tests
+        run: go test -race -count=1 ./internal/command -timeout 10m
+        env:
+          GOMEMLIMIT: 5GiB
 
       - name: Integration tests
         run: go test -count=1 ./test/integration
