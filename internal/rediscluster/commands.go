@@ -296,8 +296,21 @@ func (c *clusterCommands) setSlot(args [][]byte) iredis.Reply {
 	return protocol.MakeErrReply("ERR Invalid CLUSTER SETSLOT action or number of arguments")
 }
 
-// setSlotMigration is completed in Task 6 (IMPORTING/MIGRATING). Until then it
-// rejects the action so SETSLOT NODE/STABLE remain usable.
+// setSlotMigration handles SETSLOT <slot> IMPORTING <id> | MIGRATING <id>.
 func (c *clusterCommands) setSlotMigration(slot uint16, mode string, args [][]byte) iredis.Reply {
-	return protocol.MakeErrReply("ERR SETSLOT IMPORTING/MIGRATING not yet enabled")
+	if len(args) != 3 {
+		return protocol.MakeArgNumErrReply("cluster|setslot")
+	}
+	nodeID := string(args[2])
+	ok := false
+	if mode == "MIGRATING" {
+		ok = c.state.setMigrating(slot, nodeID)
+	} else { // IMPORTING
+		ok = c.state.setImporting(slot, nodeID)
+	}
+	if !ok {
+		return protocol.MakeErrReply("ERR Unknown node " + nodeID)
+	}
+	_ = c.state.save()
+	return protocol.MakeOkReply()
 }

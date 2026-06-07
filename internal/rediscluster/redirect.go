@@ -14,9 +14,10 @@ import (
 // It intercepts the CLUSTER/ASKING/READONLY/READWRITE commands and, for ordinary
 // key commands, returns MOVED/ASK/CROSSSLOT when this node is not the slot owner.
 type ClusterEngine struct {
-	inner    iface.StorageEngine
-	state    *clusterState
-	commands *clusterCommands
+	inner     iface.StorageEngine
+	state     *clusterState
+	commands  *clusterCommands
+	keyExists keyExistsFunc
 }
 
 // NewClusterEngine wraps inner with redirection driven by state. keysInSlot scans
@@ -26,12 +27,17 @@ type ClusterEngine struct {
 func NewClusterEngine(inner iface.StorageEngine, state *clusterState) *ClusterEngine {
 	ce := &ClusterEngine{inner: inner, state: state}
 	ce.commands = newClusterCommands(state, func(slot uint16, count int) []string { return nil })
+	ce.keyExists = func(string) bool { return false }
 	return ce
 }
 
 // SetKeysInSlot installs the real key-enumeration callback (used by COUNT/GETKEYSINSLOT
 // and migration). Wired in Task 6/8 against the engine's keyspace iterator.
 func (ce *ClusterEngine) SetKeysInSlot(fn keysInSlotFunc) { ce.commands.keysInSlot = fn }
+
+// SetKeyExists installs the key-existence probe used by ASK redirection.
+// Wired in Task 8 against the engine's keyspace; defaults to always-false.
+func (ce *ClusterEngine) SetKeyExists(fn keyExistsFunc) { ce.keyExists = fn }
 
 // Commands exposes the CLUSTER handler so the gossip bus (Task 7) can mutate state
 // through the same object.
@@ -52,6 +58,8 @@ func (ce *ClusterEngine) Exec(c iredis.Connection, cmdLine iface.CmdLine) iredis
 		return protocol.MakeOkReply()
 	case "READWRITE":
 		return protocol.MakeOkReply()
+	case "MIGRATE":
+		return migrateReply(cmdLine[1:])
 	}
 
 	keys := database.ExtractKeys(cmdLine)
@@ -69,11 +77,13 @@ func (ce *ClusterEngine) Exec(c iredis.Connection, cmdLine iface.CmdLine) iredis
 	}
 
 	if ce.state.imOwner(slot) {
+		if r := ce.maybeAsk(c, slot, cmdLine); r != nil {
+			return r
+		}
 		return ce.inner.Exec(c, cmdLine)
 	}
 
-	// Not the owner: ASK if we are importing this slot and the client sent ASKING
-	// (Task 6 completes the ASK path); otherwise MOVED to the real owner.
+	// Not the owner: ASK if we are importing this slot and the client sent ASKING.
 	if r := ce.maybeAsk(c, slot, cmdLine); r != nil {
 		return r
 	}
@@ -100,9 +110,40 @@ func NewClusterEngineFromConfig(inner iface.StorageEngine, ip string, port int, 
 	return NewClusterEngine(inner, state), nil
 }
 
-// maybeAsk is completed in Task 6. Returning nil means "fall through to MOVED".
+// maybeAsk handles ASK redirection during slot migration.
+// Returning nil means "fall through to MOVED" (or serve locally if owner).
 func (ce *ClusterEngine) maybeAsk(c iredis.Connection, slot uint16, cmdLine iface.CmdLine) iredis.Reply {
-	return nil
+	// Case A: we own the slot and it is MIGRATING out; if the (first) key is gone
+	// locally, redirect the client to the import target with ASK.
+	if target := ce.state.migratingTo(slot); target != "" && ce.state.imOwner(slot) {
+		keys := database.ExtractKeys(cmdLine)
+		allPresent := true
+		for _, k := range keys {
+			if !ce.keyExists(string(k)) {
+				allPresent = false
+				break
+			}
+		}
+		if !allPresent {
+			if tn := ce.state.nodeByID(target); tn != nil {
+				return protocol.MakeErrReply(fmt.Sprintf("ASK %d %s:%d", slot, tn.ip, tn.port))
+			}
+		}
+		return nil // keys present locally: serve here (caller proceeds to inner)
+	}
+	// Case B: we do NOT own the slot but we are IMPORTING it and the client sent
+	// ASKING (one-shot): serve locally instead of MOVED.
+	if src := ce.state.importingFrom(slot); src != "" {
+		if takeAsking(c) {
+			return execLocal(ce.inner, c, cmdLine)
+		}
+	}
+	return nil // fall through to MOVED
+}
+
+// execLocal is a thin wrapper to make the ASK-serve path explicit/testable.
+func execLocal(inner iface.StorageEngine, c iredis.Connection, cmdLine iface.CmdLine) iredis.Reply {
+	return inner.Exec(c, cmdLine)
 }
 
 var _ iface.StorageEngine = (*ClusterEngine)(nil)
