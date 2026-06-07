@@ -90,6 +90,7 @@ func NewStandaloneServer() *Server {
 	server.slaveStatus = initReplSlaveStatus()
 	server.initMasterStatus()
 	server.startReplCron()
+	server.startServerCron()
 	server.role = masterRole // The initialization process does not require atomicity
 
 	// record slow log
@@ -438,6 +439,35 @@ func (server *Server) startReplCron() {
 			mdb.masterCron()
 		}
 	}(server)
+}
+
+// startServerCron runs the hz-driven background cron: active expiration across
+// all databases. Separate from the 10s startReplCron. Mirrors Redis serverCron's
+// databasesCron -> activeExpireCycle.
+func (server *Server) startServerCron() {
+	go func(mdb *Server) {
+		ticker := time.NewTicker(serverCronPeriod())
+		defer ticker.Stop()
+		for range ticker.C {
+			mdb.activeExpireAllDBs()
+		}
+	}(server)
+}
+
+// activeExpireAllDBs runs one active-expire pass over every database.
+func (server *Server) activeExpireAllDBs() {
+	defer func() {
+		if err := recover(); err != nil {
+			logger.Warn(fmt.Sprintf("serverCron active-expire panic: %v", err))
+		}
+	}()
+	for i := range server.dbSet {
+		db := server.mustSelectDB(i)
+		db.activeExpireCycle(activeExpireConfig{
+			sampleSize: activeExpireKeysPerLoop,
+			maxLoops:   16,
+		})
+	}
 }
 
 // GetAvgTTL Calculate the average expiration time of keys
