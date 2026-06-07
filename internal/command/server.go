@@ -43,6 +43,9 @@ type Server struct {
 	// slow log record
 	slogLogger *SlowLogger
 
+	// activeExpireEnabled controls whether the active-expire cron runs.
+	activeExpireEnabled bool
+
 	// serverCronDone signals the serverCron goroutine to stop on Close().
 	serverCronDone chan struct{}
 
@@ -108,6 +111,7 @@ func NewStandaloneServer() *Server {
 			logger.Error(err)
 		}
 	}
+	server.activeExpireEnabled = true
 	server.slaveStatus = initReplSlaveStatus()
 	server.initMasterStatus()
 	server.startReplCron()
@@ -153,6 +157,9 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 	// info
 	if cmdName == "info" {
 		return Info(server, cmdLine[1:])
+	}
+	if cmdName == "debug" {
+		return execDebug(server, c, cmdLine[1:])
 	}
 
 	// slowlog
@@ -522,6 +529,9 @@ func (server *Server) StartCron() {
 
 // activeExpireAllDBs runs one active-expire pass over every database.
 func (server *Server) activeExpireAllDBs() {
+	if !server.activeExpireEnabled {
+		return
+	}
 	defer func() {
 		if err := recover(); err != nil {
 			logger.Warn(fmt.Sprintf("serverCron active-expire panic: %v", err))
