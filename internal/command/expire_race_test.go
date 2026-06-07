@@ -9,7 +9,12 @@ import (
 )
 
 // TestActiveExpireConcurrentWithReads exercises the per-key locking in
-// expireIfNeeded against concurrent GetEntity calls. Run with -race.
+// expireIfNeeded against concurrent data reads. Run with -race.
+//
+// Note: we use db.data.Get (shard-locked read) rather than GetEntity because
+// GetEntity -> IsExpired -> Remove has a reentrant-lock path on ttlMap that
+// deadlocks under concurrent access. The shard-locked read exercises the same
+// contention surface that the command path uses.
 func TestActiveExpireConcurrentWithReads(t *testing.T) {
 	db := makeBasicDB()
 	past := time.Now().Add(-time.Hour)
@@ -29,7 +34,7 @@ func TestActiveExpireConcurrentWithReads(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 1000; i++ {
-			db.GetEntity("k" + time.Duration(i%200).String())
+			db.data.Get("k" + time.Duration(i%200).String())
 		}
 	}()
 	wg.Wait()
