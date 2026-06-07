@@ -147,28 +147,39 @@ func (persister *Persister) generateRDB(ctx *RewriteCtx) error {
 				case object.TypeString:
 					err = encoder.WriteStringObject(key, obj.GetStringBytes(), opts...)
 				case object.TypeList:
-					list, ok := obj.Value().(List.List)
-					if !ok {
-						break
+					if objList, ok := obj.Value().(*object.List); ok {
+						vals := make([][]byte, 0, objList.Len())
+						objList.ForEach(func(i int, v interface{}) bool {
+							bytes, _ := v.([]byte)
+							vals = append(vals, bytes)
+							return true
+						})
+						err = encoder.WriteListObject(key, vals, opts...)
+					} else if list, ok := obj.Value().(List.List); ok {
+						vals := make([][]byte, 0, list.Len())
+						list.ForEach(func(i int, v interface{}) bool {
+							bytes, _ := v.([]byte)
+							vals = append(vals, bytes)
+							return true
+						})
+						err = encoder.WriteListObject(key, vals, opts...)
 					}
-					vals := make([][]byte, 0, list.Len())
-					list.ForEach(func(i int, v interface{}) bool {
-						bytes, _ := v.([]byte)
-						vals = append(vals, bytes)
-						return true
-					})
-					err = encoder.WriteListObject(key, vals, opts...)
 				case object.TypeSet:
-					s, ok := obj.Value().(*set.Set)
-					if !ok {
-						break
+					if objSet, ok := obj.Value().(*object.Set); ok {
+						vals := make([][]byte, 0, objSet.Len())
+						objSet.ForEach(func(m string) bool {
+							vals = append(vals, []byte(m))
+							return true
+						})
+						err = encoder.WriteSetObject(key, vals, opts...)
+					} else if s, ok := obj.Value().(*set.Set); ok {
+						vals := make([][]byte, 0, s.Len())
+						s.ForEach(func(m string) bool {
+							vals = append(vals, []byte(m))
+							return true
+						})
+						err = encoder.WriteSetObject(key, vals, opts...)
 					}
-					vals := make([][]byte, 0, s.Len())
-					s.ForEach(func(m string) bool {
-						vals = append(vals, []byte(m))
-						return true
-					})
-					err = encoder.WriteSetObject(key, vals, opts...)
 				case object.TypeHash:
 					hash, ok := obj.Value().(*object.Hash)
 					if !ok {
