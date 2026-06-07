@@ -327,3 +327,167 @@ func TestWaitTimesOutWhenNotEnoughReplicas(t *testing.T) {
 		t.Fatalf("WAIT returned too early: %s", elapsed)
 	}
 }
+
+func TestFullResyncCatchUp(t *testing.T) {
+	masterAddr, stopMaster := startHayakvRepl(t, "")
+	defer stopMaster()
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	// Pre-existing data on master before the replica attaches.
+	for i := 0; i < 30; i++ {
+		if err := master.Set(ctx, fmt.Sprintf("pre%d", i), fmt.Sprintf("%d", i), 0).Err(); err != nil {
+			t.Fatalf("pre SET: %v", err)
+		}
+	}
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	pollGet(t, replica, "pre0", "0", 15*time.Second)
+	pollGet(t, replica, "pre29", "29", 15*time.Second)
+}
+
+func TestLivePropagation(t *testing.T) {
+	masterAddr, stopMaster := startHayakvRepl(t, "")
+	defer stopMaster()
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	// Wait for the link to be established (warm key).
+	if err := master.Set(ctx, "warm", "1", 0).Err(); err != nil {
+		t.Fatalf("warm SET: %v", err)
+	}
+	pollGet(t, replica, "warm", "1", 10*time.Second)
+
+	// Writes after attach propagate live.
+	if err := master.Set(ctx, "k", "live", 0).Err(); err != nil {
+		t.Fatalf("SET: %v", err)
+	}
+	pollGet(t, replica, "k", "live", 10*time.Second)
+
+	// Writes against the read-only replica are rejected.
+	if err := replica.Set(ctx, "k", "nope", 0).Err(); err == nil {
+		t.Fatalf("expected READONLY error writing to replica")
+	} else if !strings.Contains(err.Error(), "READONLY") {
+		t.Fatalf("replica write error = %v, want READONLY", err)
+	}
+}
+
+func TestPromoteReplicaWithReplicaofNoOne(t *testing.T) {
+	masterAddr, stopMaster := startHayakvRepl(t, "")
+	defer stopMaster()
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	if err := master.Set(ctx, "before", "promote", 0).Err(); err != nil {
+		t.Fatalf("SET: %v", err)
+	}
+	pollGet(t, replica, "before", "promote", 10*time.Second)
+
+	// Promote: REPLICAOF NO ONE.
+	if err := replica.Do(ctx, "REPLICAOF", "NO", "ONE").Err(); err != nil {
+		t.Fatalf("REPLICAOF NO ONE: %v", err)
+	}
+	// INFO now reports role:master.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(replica.Info(ctx, "replication").Val(), "role:master") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(replica.Info(ctx, "replication").Val(), "role:master") {
+		t.Fatalf("replica did not promote to role:master:\n%s", replica.Info(ctx, "replication").Val())
+	}
+	// Promoted node accepts writes.
+	if err := replica.Set(ctx, "afterpromote", "ok", 0).Err(); err != nil {
+		t.Fatalf("write after promote: %v", err)
+	}
+	if got := replica.Get(ctx, "afterpromote").Val(); got != "ok" {
+		t.Fatalf("GET afterpromote = %q, want ok", got)
+	}
+}
+
+func TestInfoReplicationFields(t *testing.T) {
+	masterAddr, stopMaster := startHayakvRepl(t, "")
+	defer stopMaster()
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	master := redis.NewClient(&redis.Options{Addr: masterAddr, Protocol: 2})
+	defer master.Close()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	// Master before any replica.
+	minfo := master.Info(ctx, "replication").Val()
+	for _, want := range []string{"role:master", "connected_slaves:", "master_replid:",
+		"master_repl_offset:", "master_failover_state:no-failover"} {
+		if !strings.Contains(minfo, want) {
+			t.Fatalf("master INFO replication missing %q:\n%s", want, minfo)
+		}
+	}
+
+	mhost, mport := splitAddr(t, masterAddr)
+	if err := replica.Do(ctx, "REPLICAOF", mhost, mport).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+	if err := master.Set(ctx, "warm", "1", 0).Err(); err != nil {
+		t.Fatalf("warm: %v", err)
+	}
+	pollGet(t, replica, "warm", "1", 10*time.Second)
+
+	// Poll until the replica's link status is "up" — may lag behind data delivery.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(replica.Info(ctx, "replication").Val(), "master_link_status:up") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	rinfo := replica.Info(ctx, "replication").Val()
+	for _, want := range []string{"role:slave", "master_host:" + mhost, "master_port:" + mport,
+		"master_link_status:up", "slave_read_only:1", "slave_repl_offset:"} {
+		if !strings.Contains(rinfo, want) {
+			t.Fatalf("replica INFO replication missing %q:\n%s", want, rinfo)
+		}
+	}
+	// Master now lists at least one connected slave.
+	slaveDeadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(slaveDeadline) {
+		if strings.Contains(master.Info(ctx, "replication").Val(), "slave0:") {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("master never listed slave0:\n%s", master.Info(ctx, "replication").Val())
+}
