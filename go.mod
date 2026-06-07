@@ -8,6 +8,9 @@ require (
 	github.com/hdt3213/rdb v1.3.2
 	github.com/panjf2000/gnet/v2 v2.7.2
 	github.com/redis/go-redis/v9 v9.20.0
+	github.com/yuin/gopher-lua v1.1.2
+	golang.org/x/sys v0.30.0
+	pgregory.net/rapid v1.3.0
 )
 
 require (
@@ -28,7 +31,5 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
-	pgregory.net/rapid v1.3.0 // indirect
 )

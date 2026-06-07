@@ -73,5 +73,21 @@ type Object interface {
 	Value() any
 }
 
+// ScriptInvoker runs one command through the normal server execution path on
+// behalf of a script's redis.call/pcall. Its writes propagate to AOF/replicas
+// (effects replication) because the path goes through db.addAof.
+type ScriptInvoker func(client iredis.Connection, cmdLine CmdLine) iredis.Reply
+
+// ScriptEngine is the seam for server-side scripting (default: gopher-lua; a
+// cgo/liblua impl can replace it without touching the command layer).
+type ScriptEngine interface {
+	Eval(client iredis.Connection, body string, keys, args []string) iredis.Reply
+	EvalSha(client iredis.Connection, sha string, keys, args []string) iredis.Reply
+	Load(body string) (sha string)
+	Exists(shas []string) []bool
+	Flush()
+	Kill() error
+}
+
 // Compile-time check: database.DB satisfies StorageEngine.
 var _ StorageEngine = (idatabase.DB)(nil)
