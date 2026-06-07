@@ -11,22 +11,16 @@ func redisDBCorpus() []Scenario {
 			{Args: []string{"SET", "s1", "v1"}},
 			{Args: []string{"SET", "s2", "v2"}},
 			{Args: []string{"SET", "s3", "v3"}},
-			{Args: []string{"SCAN", "0"}},
+			{Args: []string{"SCAN", "0"}, Normalize: normalizeScan},
 		}},
 		{Name: "scan match pattern", Commands: []Command{
 			{Args: []string{"SET", "user:1", "alice"}},
 			{Args: []string{"SET", "user:2", "bob"}},
 			{Args: []string{"SET", "item:1", "sword"}},
-			{Args: []string{"SCAN", "0", "MATCH", "user:*"}},
+			{Args: []string{"SCAN", "0", "MATCH", "user:*"}, Normalize: normalizeScan},
 		}},
-		{Name: "scan count", Commands: []Command{
-			{Args: []string{"SET", "k1", "v1"}},
-			{Args: []string{"SET", "k2", "v2"}},
-			{Args: []string{"SET", "k3", "v3"}},
-			{Args: []string{"SET", "k4", "v4"}},
-			{Args: []string{"SET", "k5", "v5"}},
-			{Args: []string{"SCAN", "0", "COUNT", "2"}},
-		}},
+		// scan_count removed: SCAN COUNT is a hint — different implementations
+		// return different key subsets, making byte-for-byte comparison invalid.
 		{Name: "dbsize", Commands: []Command{
 			{Args: []string{"SET", "a", "1"}},
 			{Args: []string{"SET", "b", "2"}},
@@ -37,7 +31,7 @@ func redisDBCorpus() []Scenario {
 			{Args: []string{"SET", "name:1", "a"}},
 			{Args: []string{"SET", "name:2", "b"}},
 			{Args: []string{"SET", "other", "c"}},
-			{Args: []string{"KEYS", "name:*"}},
+			{Args: []string{"KEYS", "name:*"}, Normalize: sortRespArray},
 		}},
 		{Name: "flushdb then set", Commands: []Command{
 			{Args: []string{"SET", "x", "1"}},

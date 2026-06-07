@@ -333,9 +333,14 @@ func TestDifferentialRedisDB(t *testing.T) {
 				t.Fatalf("reply count hayakv=%d redis=%d", len(hayakvReplies), len(redisReplies))
 			}
 			for i := range hayakvReplies {
-				if !bytes.Equal(hayakvReplies[i], redisReplies[i]) {
+				hReply, rReply := hayakvReplies[i], redisReplies[i]
+				if fn := scenario.Commands[i].Normalize; fn != nil {
+					hReply = fn(hReply)
+					rReply = fn(rReply)
+				}
+				if !bytes.Equal(hReply, rReply) {
 					t.Fatalf("command %v\nhayakv: %q\nredis:  %q",
-						scenario.Commands[i].Args, hayakvReplies[i], redisReplies[i])
+						scenario.Commands[i].Args, hReply, rReply)
 				}
 			}
 		})
