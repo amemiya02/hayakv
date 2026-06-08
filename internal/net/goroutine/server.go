@@ -88,7 +88,7 @@ func ServeTLS(addr string, handler *Handler, certFile, keyFile, caCertFile strin
 			return fmt.Errorf("failed to parse CA cert")
 		}
 		tlsCfg.ClientCAs = pool
-		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsCfg.ClientAuth = tls.VerifyClientCertIfGiven
 	}
 
 	ln, err := tls.Listen("tcp", addr, tlsCfg)
