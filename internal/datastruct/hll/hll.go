@@ -456,28 +456,28 @@ func (h *HLL) Count() uint64 {
 		}
 	}
 
-	// Ertl 2017 estimator (matching Redis hllCount)
+	// Ertl 2017 estimator (matching Redis hllCount exactly).
+	// Build register histogram: reghisto[i] = count of registers with value i.
 	m := float64(hllRegisters)
-	ez := 0 // number of zero registers
-
-	// Compute sum of 2^-R and count zeros using Ertl's sigma/tau
-	z := m * hllTau(float64(registers[0])/m)
-	for i := 1; i < hllRegisters; i++ {
-		z += 1.0 / math.Pow(2.0, float64(registers[i]))
-		if registers[i] == 0 {
-			ez++
-		}
-	}
-	if registers[0] == 0 {
-		ez++ // count first register if zero
+	var reghisto [52]int // values 0..51
+	for _, v := range registers {
+		reghisto[v]++
 	}
 
-	E := hllSigma(1.0-z/m) * m * m / z
+	// z = m * tau((m - reghisto[51]) / m)
+	z := m * hllTau((m-float64(reghisto[51]))/m)
 
-	// Linear counting for small cardinalities
-	if E <= 5.0*m && ez != 0 {
-		E = m * math.Log(m/float64(ez))
+	// Fold: for j = 50 down to 1: z += reghisto[j]; z *= 0.5
+	for j := 50; j >= 1; j-- {
+		z += float64(reghisto[j])
+		z *= 0.5
 	}
+
+	// z += m * sigma(reghisto[0] / m)
+	z += m * hllSigma(float64(reghisto[0])/m)
+
+	// E = alpha_m * m^2 / z, where alpha_m = 1/(2*ln(2)) ≈ 0.72134752
+	E := 0.72134752 * m * m / z
 
 	est := uint64(E + 0.5)
 

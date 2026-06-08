@@ -141,9 +141,9 @@ func TestXReadNonBlockingNoData(t *testing.T) {
 
 	testDB.Exec(conn, utils.ToCmdLine("XADD", "st", "1-0", "f", "v"))
 
-	// XREAD with ID = last ID should return null
+	// XREAD with ID = last ID should return null array
 	ret := testDB.Exec(conn, utils.ToCmdLine("XREAD", "COUNT", "10", "STREAMS", "st", "1-0"))
-	if string(ret.ToBytes()) != "$-1\r\n" {
+	if string(ret.ToBytes()) != "*-1\r\n" {
 		t.Fatalf("XREAD no data = %q", ret.ToBytes())
 	}
 }
