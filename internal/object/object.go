@@ -9,6 +9,7 @@ const (
 	TypeSet
 	TypeHash
 	TypeZSet
+	TypeStream
 )
 
 // Encoding represents the encoding of a Redis object
@@ -24,6 +25,7 @@ const (
 	EncIntset                     // intset
 	EncHashtable                  // hashtable/dict
 	EncSkiplist                   // skiplist (for sorted set)
+	EncStream                     // stream
 )
 
 // Robj is a Redis object with type, encoding, and pointer to actual data
@@ -55,6 +57,8 @@ func (r *Robj) TypeName() string {
 		return "hash"
 	case TypeZSet:
 		return "zset"
+	case TypeStream:
+		return "stream"
 	default:
 		return "unknown"
 	}
@@ -79,6 +83,8 @@ func (r *Robj) EncodingName() string {
 		return "hashtable"
 	case EncSkiplist:
 		return "skiplist"
+	case EncStream:
+		return "stream"
 	default:
 		return "unknown"
 	}
