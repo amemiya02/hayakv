@@ -10,6 +10,7 @@ import (
 	List "github.com/amemiya02/hayakv/internal/datastruct/list"
 	"github.com/amemiya02/hayakv/internal/datastruct/set"
 	SortedSet "github.com/amemiya02/hayakv/internal/datastruct/sortedset"
+	"github.com/amemiya02/hayakv/internal/datastruct/stream"
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/persist/rdb"
@@ -173,6 +174,12 @@ func writeRobjEntity(enc *rdb.Encoder, key []byte, robj *object.Robj, expireMS u
 			return true
 		})
 		return enc.WriteZSetEntry(key, members, expireMS)
+	case object.TypeStream:
+		s, ok := robj.Ptr.(*stream.Stream)
+		if !ok {
+			return nil
+		}
+		return enc.WriteStreamEntry(key, s, expireMS)
 	default:
 		return nil
 	}
@@ -211,11 +218,63 @@ func LoadEntriesAsCommands(e rdb.Entry) [][]CmdLine {
 			args = append(args, []byte(strconv.FormatFloat(m.Score, 'g', -1, 64)), m.Member)
 		}
 		cmds = append(cmds, args)
+	case rdb.EntryType(20): // stream (hayakv-internal typeStream)
+		cmds = streamEntriesToCommands(string(key), e.StreamVal)
 	}
 	if e.ExpireMS != 0 && len(cmds) > 0 {
 		cmds = append(cmds, CmdLine{[]byte("PEXPIREAT"), key, []byte(strconv.FormatUint(e.ExpireMS, 10))})
 	}
 	return [][]CmdLine{cmds}
+}
+
+// streamEntriesToCommands rebuilds a stream from its decoded RDB representation.
+// It returns a sequence of XADD commands (one per entry) plus XGROUP CREATE and
+// XSETID commands to restore group state.
+func streamEntriesToCommands(key string, sd *rdb.StreamData) []CmdLine {
+	if sd == nil {
+		return nil
+	}
+	var cmds []CmdLine
+
+	// XADD each entry with the exact stored ID
+	for _, e := range sd.Entries {
+		args := CmdLine{[]byte("XADD"), []byte(key), []byte(e.ID.String())}
+		for _, f := range e.Fields {
+			args = append(args, []byte(f[0]), []byte(f[1]))
+		}
+		cmds = append(cmds, args)
+	}
+
+	// Recreate consumer groups
+	for _, gd := range sd.Groups {
+		args := CmdLine{
+			[]byte("XGROUP"), []byte("CREATE"), []byte(key),
+			[]byte(gd.Name), []byte(gd.LastDelivered.String()),
+		}
+		cmds = append(cmds, args)
+
+		// Restore pending entries via XCLAIM to rebuild PEL with correct delivery metadata
+		for _, pe := range gd.Pending {
+			args := CmdLine{
+				[]byte("XCLAIM"), []byte(key), []byte(gd.Name), []byte(pe.Consumer),
+				[]byte("0"), []byte(pe.ID.String()),
+				[]byte("JUSTID"),
+			}
+			cmds = append(cmds, args)
+		}
+	}
+
+	// XSETID to restore stream metadata (lastID, entriesAdded, maxDeletedID)
+	if sd.EntriesAdded > 0 || sd.LastID.Ms > 0 || sd.LastID.Seq > 0 {
+		args := CmdLine{
+			[]byte("XSETID"), []byte(key), []byte(sd.LastID.String()),
+			[]byte("ENTRIESADDED"), []byte(strconv.FormatUint(sd.EntriesAdded, 10)),
+			[]byte("MAXDELETEDID"), []byte(sd.MaxDeletedID.String()),
+		}
+		cmds = append(cmds, args)
+	}
+
+	return cmds
 }
 
 var _ = config.Properties // bridge participates in config-gated wiring (Task 9/Task 11)

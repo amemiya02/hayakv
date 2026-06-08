@@ -1,5 +1,7 @@
 package rdb
 
+import "strconv"
+
 // Opcodes (first byte of a record at top level).
 const (
 	opAux       = 0xFA
@@ -21,6 +23,8 @@ const (
 	typeSet    = 2
 	typeZSet   = 3 // v1: score serialized as an ASCII string
 	typeHash   = 4
+
+	typeStream = 20 // hayakv-internal stream type (not cross-loadable with Redis)
 )
 
 // Length-encoding tags (top two bits of the first length byte).
@@ -59,6 +63,7 @@ type Entry struct {
 	SetVal    [][]byte
 	HashVal   map[string][]byte
 	ZSetVal   []ZSetMember
+	StreamVal *StreamData
 	// ExpireMS is the absolute expire in unix milliseconds; 0 means no expiry.
 	ExpireMS uint64
 }
@@ -67,4 +72,54 @@ type Entry struct {
 type ZSetMember struct {
 	Member []byte
 	Score  float64
+}
+
+// StreamData holds a decoded stream's entries, groups, and metadata.
+type StreamData struct {
+	LastID       StreamID
+	MaxDeletedID StreamID
+	EntriesAdded uint64
+	Entries      []StreamEntry
+	Groups       []StreamGroupData
+}
+
+// StreamID is a decoded stream entry ID.
+type StreamID struct {
+	Ms  uint64
+	Seq uint64
+}
+
+// String returns the stream ID in "ms-seq" format.
+func (id StreamID) String() string {
+	return strconv.FormatUint(id.Ms, 10) + "-" + strconv.FormatUint(id.Seq, 10)
+}
+
+// StreamEntry is one decoded stream entry.
+type StreamEntry struct {
+	ID     StreamID
+	Fields [][2]string
+}
+
+// StreamGroupData holds a decoded consumer group's state.
+type StreamGroupData struct {
+	Name          string
+	LastDelivered StreamID
+	EntriesRead   uint64
+	Pending       []StreamPendingEntry
+	Consumers     []StreamConsumerData
+}
+
+// StreamPendingEntry is one decoded PEL entry.
+type StreamPendingEntry struct {
+	ID            StreamID
+	Consumer      string
+	DeliveryTime  int64
+	DeliveryCount uint64
+}
+
+// StreamConsumerData holds a decoded consumer's state.
+type StreamConsumerData struct {
+	Name       string
+	ActiveTime int64
+	Pending    []StreamID
 }

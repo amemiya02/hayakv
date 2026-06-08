@@ -3,6 +3,8 @@ package rdb
 import (
 	"encoding/binary"
 	"io"
+
+	"github.com/amemiya02/hayakv/internal/datastruct/stream"
 )
 
 // Encoder writes an RDB v11 stream and finalizes a CRC64 trailer.
@@ -166,6 +168,145 @@ func (e *Encoder) WriteZSetEntry(key []byte, members []ZSetMember, expireMS uint
 			return err
 		}
 	}
+	return nil
+}
+
+// WriteStreamEntry writes a hayakv-internal stream entry.
+// Format: [expire?] typeStream key
+//
+//	lastMs lastSeq maxDelMs maxDelSeq entriesAdded
+//	numEntries
+//	for each entry: ms seq numFields (fieldKey fieldValue)...
+//	numGroups
+//	for each group: groupName lastDelMs lastDelSeq entriesRead
+//	  numPending
+//	  for each pending: pMs pSeq consumer deliveryTime deliveryCount
+//	  numConsumers
+//	  for each consumer: consumerName activeTime
+//	    numCPending
+//	    for each cPending: pMs pSeq
+func (e *Encoder) WriteStreamEntry(key []byte, s *stream.Stream, expireMS uint64) error {
+	if err := e.writeExpire(expireMS); err != nil {
+		return err
+	}
+	if err := e.w.writeByte(typeStream); err != nil {
+		return err
+	}
+	if err := e.w.writeString(key); err != nil {
+		return err
+	}
+
+	// Stream metadata
+	if err := e.w.writeLen(s.LastID().Ms); err != nil {
+		return err
+	}
+	if err := e.w.writeLen(s.LastID().Seq); err != nil {
+		return err
+	}
+	if err := e.w.writeLen(s.MaxDeletedID().Ms); err != nil {
+		return err
+	}
+	if err := e.w.writeLen(s.MaxDeletedID().Seq); err != nil {
+		return err
+	}
+	if err := e.w.writeLen(s.EntriesAdded()); err != nil {
+		return err
+	}
+
+	// Entries
+	entries := s.Range(stream.StreamID{Ms: 0, Seq: 0}, stream.StreamID{Ms: ^uint64(0), Seq: ^uint64(0)}, -1)
+	if err := e.w.writeLen(uint64(len(entries))); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := e.w.writeLen(entry.ID.Ms); err != nil {
+			return err
+		}
+		if err := e.w.writeLen(entry.ID.Seq); err != nil {
+			return err
+		}
+		if err := e.w.writeLen(uint64(len(entry.Fields))); err != nil {
+			return err
+		}
+		for _, f := range entry.Fields {
+			if err := e.w.writeString([]byte(f[0])); err != nil {
+				return err
+			}
+			if err := e.w.writeString([]byte(f[1])); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Groups
+	groups := s.Groups()
+	if err := e.w.writeLen(uint64(len(groups))); err != nil {
+		return err
+	}
+	for _, g := range groups {
+		if err := e.w.writeString([]byte(g.Name)); err != nil {
+			return err
+		}
+		if err := e.w.writeLen(g.LastDelivered().Ms); err != nil {
+			return err
+		}
+		if err := e.w.writeLen(g.LastDelivered().Seq); err != nil {
+			return err
+		}
+		if err := e.w.writeLen(g.EntriesRead()); err != nil {
+			return err
+		}
+
+		// Pending entries (group-level PEL)
+		pending := g.PendingMap()
+		if err := e.w.writeLen(uint64(len(pending))); err != nil {
+			return err
+		}
+		for id, pe := range pending {
+			if err := e.w.writeLen(id.Ms); err != nil {
+				return err
+			}
+			if err := e.w.writeLen(id.Seq); err != nil {
+				return err
+			}
+			if err := e.w.writeString([]byte(pe.Consumer)); err != nil {
+				return err
+			}
+			if err := e.w.writeLen(uint64(pe.DeliveryTime)); err != nil {
+				return err
+			}
+			if err := e.w.writeLen(pe.DeliveryCount); err != nil {
+				return err
+			}
+		}
+
+		// Consumers
+		consumers := g.Consumers()
+		if err := e.w.writeLen(uint64(len(consumers))); err != nil {
+			return err
+		}
+		for _, c := range consumers {
+			if err := e.w.writeString([]byte(c.Name)); err != nil {
+				return err
+			}
+			if err := e.w.writeLen(uint64(c.ActiveTime)); err != nil {
+				return err
+			}
+			// Consumer pending list
+			if err := e.w.writeLen(uint64(len(c.Pending))); err != nil {
+				return err
+			}
+			for id := range c.Pending {
+				if err := e.w.writeLen(id.Ms); err != nil {
+					return err
+				}
+				if err := e.w.writeLen(id.Seq); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	return nil
 }
 

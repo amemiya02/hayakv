@@ -152,9 +152,191 @@ func (d *Decoder) readObject(typeByte byte, db int, expireMS uint64) (Entry, err
 			e.ZSetVal = append(e.ZSetVal, ZSetMember{Member: m, Score: score})
 		}
 		return e, nil
+	case typeStream:
+		sd, err := d.readStreamData()
+		if err != nil {
+			return e, err
+		}
+		e.StreamVal = sd
+		return e, nil
 	default:
 		return e, fmt.Errorf("rdb: unsupported value type %d (listpack/intset/quicklist variants are not supported)", typeByte)
 	}
+}
+
+func (d *Decoder) readStreamData() (*StreamData, error) {
+	// Stream metadata
+	lastMs, _, err := d.r.readLen()
+	if err != nil {
+		return nil, err
+	}
+	lastSeq, _, err := d.r.readLen()
+	if err != nil {
+		return nil, err
+	}
+	maxDelMs, _, err := d.r.readLen()
+	if err != nil {
+		return nil, err
+	}
+	maxDelSeq, _, err := d.r.readLen()
+	if err != nil {
+		return nil, err
+	}
+	entriesAdded, _, err := d.r.readLen()
+	if err != nil {
+		return nil, err
+	}
+
+	// Entries
+	numEntries, _, err := d.r.readLen()
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]StreamEntry, numEntries)
+	for i := uint64(0); i < numEntries; i++ {
+		ms, _, err := d.r.readLen()
+		if err != nil {
+			return nil, err
+		}
+		seq, _, err := d.r.readLen()
+		if err != nil {
+			return nil, err
+		}
+		numFields, _, err := d.r.readLen()
+		if err != nil {
+			return nil, err
+		}
+		fields := make([][2]string, numFields)
+		for j := uint64(0); j < numFields; j++ {
+			fk, err := d.r.readString()
+			if err != nil {
+				return nil, err
+			}
+			fv, err := d.r.readString()
+			if err != nil {
+				return nil, err
+			}
+			fields[j] = [2]string{string(fk), string(fv)}
+		}
+		entries[i] = StreamEntry{
+			ID:     StreamID{Ms: ms, Seq: seq},
+			Fields: fields,
+		}
+	}
+
+	// Groups
+	numGroups, _, err := d.r.readLen()
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]StreamGroupData, numGroups)
+	for i := uint64(0); i < numGroups; i++ {
+		gName, err := d.r.readString()
+		if err != nil {
+			return nil, err
+		}
+		gLastMs, _, err := d.r.readLen()
+		if err != nil {
+			return nil, err
+		}
+		gLastSeq, _, err := d.r.readLen()
+		if err != nil {
+			return nil, err
+		}
+		gEntriesRead, _, err := d.r.readLen()
+		if err != nil {
+			return nil, err
+		}
+
+		// Pending entries
+		numPending, _, err := d.r.readLen()
+		if err != nil {
+			return nil, err
+		}
+		pending := make([]StreamPendingEntry, numPending)
+		for j := uint64(0); j < numPending; j++ {
+			pMs, _, err := d.r.readLen()
+			if err != nil {
+				return nil, err
+			}
+			pSeq, _, err := d.r.readLen()
+			if err != nil {
+				return nil, err
+			}
+			pConsumer, err := d.r.readString()
+			if err != nil {
+				return nil, err
+			}
+			pTime, _, err := d.r.readLen()
+			if err != nil {
+				return nil, err
+			}
+			pCount, _, err := d.r.readLen()
+			if err != nil {
+				return nil, err
+			}
+			pending[j] = StreamPendingEntry{
+				ID:            StreamID{Ms: pMs, Seq: pSeq},
+				Consumer:      string(pConsumer),
+				DeliveryTime:  int64(pTime),
+				DeliveryCount: pCount,
+			}
+		}
+
+		// Consumers
+		numConsumers, _, err := d.r.readLen()
+		if err != nil {
+			return nil, err
+		}
+		consumers := make([]StreamConsumerData, numConsumers)
+		for j := uint64(0); j < numConsumers; j++ {
+			cName, err := d.r.readString()
+			if err != nil {
+				return nil, err
+			}
+			cActive, _, err := d.r.readLen()
+			if err != nil {
+				return nil, err
+			}
+			cNumPending, _, err := d.r.readLen()
+			if err != nil {
+				return nil, err
+			}
+			cPending := make([]StreamID, cNumPending)
+			for k := uint64(0); k < cNumPending; k++ {
+				cpMs, _, err := d.r.readLen()
+				if err != nil {
+					return nil, err
+				}
+				cpSeq, _, err := d.r.readLen()
+				if err != nil {
+					return nil, err
+				}
+				cPending[k] = StreamID{Ms: cpMs, Seq: cpSeq}
+			}
+			consumers[j] = StreamConsumerData{
+				Name:       string(cName),
+				ActiveTime: int64(cActive),
+				Pending:    cPending,
+			}
+		}
+
+		groups[i] = StreamGroupData{
+			Name:          string(gName),
+			LastDelivered: StreamID{Ms: gLastMs, Seq: gLastSeq},
+			EntriesRead:   gEntriesRead,
+			Pending:       pending,
+			Consumers:     consumers,
+		}
+	}
+
+	return &StreamData{
+		LastID:       StreamID{Ms: lastMs, Seq: lastSeq},
+		MaxDeletedID: StreamID{Ms: maxDelMs, Seq: maxDelSeq},
+		EntriesAdded: entriesAdded,
+		Entries:      entries,
+		Groups:       groups,
+	}, nil
 }
 
 func (d *Decoder) readStringVector() ([][]byte, error) {
