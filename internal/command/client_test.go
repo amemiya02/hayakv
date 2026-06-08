@@ -11,6 +11,7 @@ import (
 
 func TestClientSetGetName(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	// Set name
@@ -24,6 +25,7 @@ func TestClientSetGetName(t *testing.T) {
 
 func TestClientGetNilName(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	r := s.Exec(c, utils.ToCmdLine("CLIENT", "GETNAME"))
@@ -34,6 +36,7 @@ func TestClientGetNilName(t *testing.T) {
 
 func TestClientID(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 	r := s.Exec(c, utils.ToCmdLine("CLIENT", "ID"))
 	if r.ToBytes()[0] != ':' {
@@ -43,6 +46,7 @@ func TestClientID(t *testing.T) {
 
 func TestClientInfo(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 	r := s.Exec(c, utils.ToCmdLine("CLIENT", "INFO"))
 	info := string(r.ToBytes())
@@ -53,6 +57,7 @@ func TestClientInfo(t *testing.T) {
 
 func TestClientInfoWithSetName(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 	s.Exec(c, utils.ToCmdLine("CLIENT", "SETNAME", "test-client"))
 	r := s.Exec(c, utils.ToCmdLine("CLIENT", "INFO"))
@@ -64,6 +69,7 @@ func TestClientInfoWithSetName(t *testing.T) {
 
 func TestClientSetInfo(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	r := s.Exec(c, utils.ToCmdLine("CLIENT", "SETINFO", "lib-name", "mylib"))
@@ -84,6 +90,7 @@ func TestClientSetInfo(t *testing.T) {
 
 func TestClientList(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c1 := connection.NewFakeConn()
 	c2 := connection.NewFakeConn()
 
@@ -102,6 +109,7 @@ func TestClientList(t *testing.T) {
 
 func TestClientReply(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	r := s.Exec(c, utils.ToCmdLine("CLIENT", "REPLY", "OFF"))
@@ -116,6 +124,7 @@ func TestClientReply(t *testing.T) {
 
 func TestClientUnknownSubcommand(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	r := s.Exec(c, utils.ToCmdLine("CLIENT", "FOOBAR"))
@@ -124,6 +133,7 @@ func TestClientUnknownSubcommand(t *testing.T) {
 
 func TestClientNoArgs(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	r := s.Exec(c, utils.ToCmdLine("CLIENT"))

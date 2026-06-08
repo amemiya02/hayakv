@@ -9,6 +9,7 @@ import (
 
 func TestBitOpAnd(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "a", "\xff\xff"))
 	s.Exec(conn, utils.ToCmdLine("SET", "b", "\x0f\x0f"))
@@ -26,6 +27,7 @@ func TestBitOpAnd(t *testing.T) {
 
 func TestBitOpOr(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "a", "\xff\x00"))
 	s.Exec(conn, utils.ToCmdLine("SET", "b", "\x00\xff"))
@@ -42,6 +44,7 @@ func TestBitOpOr(t *testing.T) {
 
 func TestBitOpXor(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "a", "\xff\xff"))
 	s.Exec(conn, utils.ToCmdLine("SET", "b", "\x0f\x0f"))
@@ -58,6 +61,7 @@ func TestBitOpXor(t *testing.T) {
 
 func TestBitOpNot(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "a", "\xff\x00"))
 	ret := s.Exec(conn, utils.ToCmdLine("BITOP", "NOT", "dest", "a"))
@@ -73,6 +77,7 @@ func TestBitOpNot(t *testing.T) {
 
 func TestBitOpDiff(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	// a = 0xFF 0xFF, b = 0x0F 0xFF
 	// DIFF = a AND NOT(b) = 0xFF AND NOT(0x0F 0xFF) = 0xFF AND 0xF0 0x00 = 0xF0 0x00
@@ -91,6 +96,7 @@ func TestBitOpDiff(t *testing.T) {
 
 func TestBitOpDiff1(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	// a = 0x0F 0x00, b = 0xF0 0xFF
 	// DIFF1 = NOT(a) AND b = NOT(0x0F 0x00) AND 0xF0 0xFF = 0xF0 0xFF AND 0xF0 0xFF = 0xF0 0xFF
@@ -109,6 +115,7 @@ func TestBitOpDiff1(t *testing.T) {
 
 func TestBitOpAndOr(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	// a = 0xFF 0x00, b = 0x0F 0x00, c = 0x00 0xFF
 	// ANDOR = a AND (b OR c) = 0xFF 0x00 AND (0x0F 0x00 OR 0x00 0xFF) = 0xFF 0x00 AND 0x0F 0xFF = 0x0F 0x00
@@ -128,6 +135,7 @@ func TestBitOpAndOr(t *testing.T) {
 
 func TestBitOpOne(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	// a = 0x0F (bits 0-3 set), b = 0xF0 (bits 4-7 set)
 	// ONE = bits set in exactly one source = 0xFF (all bits unique to one source)
@@ -146,6 +154,7 @@ func TestBitOpOne(t *testing.T) {
 
 func TestBitOpOneOverlap(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	// a = 0x0F, b = 0x0F — bits 0-3 set in both, so no bits are in exactly one source
 	// ONE = 0x00
@@ -164,6 +173,7 @@ func TestBitOpOneOverlap(t *testing.T) {
 
 func TestBitOpNotRequiresOneKey(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "a", "\xff"))
 	s.Exec(conn, utils.ToCmdLine("SET", "b", "\x00"))
@@ -176,6 +186,7 @@ func TestBitOpNotRequiresOneKey(t *testing.T) {
 
 func TestBitOpInvalidOp(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	ret := s.Exec(conn, utils.ToCmdLine("BITOP", "INVALID", "dest", "a"))
 	raw := string(ret.ToBytes())
@@ -186,6 +197,7 @@ func TestBitOpInvalidOp(t *testing.T) {
 
 func TestBitOpMissingArgs(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	ret := s.Exec(conn, utils.ToCmdLine("BITOP", "AND"))
 	raw := string(ret.ToBytes())
@@ -196,6 +208,7 @@ func TestBitOpMissingArgs(t *testing.T) {
 
 func TestBitOpNonexistentKey(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "a", "\xff"))
 	// Nonexistent key should be treated as empty (0x00 for OR)
@@ -212,6 +225,7 @@ func TestBitOpNonexistentKey(t *testing.T) {
 
 func TestBitOpDifferentLengths(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	// a = 3 bytes, b = 1 byte
 	// OR should produce 3 bytes, with b padded with 0x00

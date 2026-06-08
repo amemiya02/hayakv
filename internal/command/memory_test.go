@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/datastruct/set"
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
@@ -39,6 +40,7 @@ func TestEstimateEntitySizeSet(t *testing.T) {
 }
 
 func TestUsedMemorySumsDBs(t *testing.T) {
+	config.Properties.AppendOnly = false
 	s := NewStandaloneServer()
 	defer s.Close()
 	before := s.usedMemory()

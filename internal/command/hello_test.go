@@ -9,6 +9,7 @@ import (
 
 func TestHelloSwitchesProtocolAndReplies(t *testing.T) {
 	server := NewStandaloneServer()
+	defer server.Close()
 	conn := connection.NewConn(nil)
 
 	reply := server.Exec(conn, [][]byte{[]byte("HELLO"), []byte("3")})

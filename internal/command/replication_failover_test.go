@@ -3,10 +3,13 @@ package database
 import (
 	"strings"
 	"testing"
+
+	"github.com/amemiya02/hayakv/config"
 )
 
 func TestWaitAofReply(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	reply := execWaitAof(s, [][]byte{[]byte("0"), []byte("0"), []byte("100")})
 	// Should return an array [local_fsynced, replicas_acked]
 	// With appendonly off (default) and numlocal=0, local_fsynced should be 0.
@@ -22,7 +25,9 @@ func TestWaitAofReply(t *testing.T) {
 
 func TestWaitAofNoAofError(t *testing.T) {
 	// When appendonly is off and numlocal > 0, should error
+	config.Properties.AppendOnly = false
 	s := NewStandaloneServer()
+	defer s.Close()
 	// Ensure AOF is off (default)
 	reply := execWaitAof(s, [][]byte{[]byte("1"), []byte("0"), []byte("100")})
 	bytes := string(reply.ToBytes())
@@ -33,6 +38,7 @@ func TestWaitAofNoAofError(t *testing.T) {
 
 func TestWaitAofArgErrors(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	// Wrong number of args
 	reply := execWaitAof(s, [][]byte{[]byte("0")})
 	if !strings.Contains(string(reply.ToBytes()), "wrong number") {
@@ -42,6 +48,7 @@ func TestWaitAofArgErrors(t *testing.T) {
 
 func TestStandaloneFailoverRequiresMaster(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	// FAILOVER must be on a master (default role is masterRole)
 	// But with no connected replicas, it should error.
 	reply := execFailover(s, nil)
@@ -59,6 +66,7 @@ func TestStandaloneFailoverRequiresMaster(t *testing.T) {
 
 func TestStandaloneFailoverAbort(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	// ABORT is sent on the master (default role is masterRole)
 	reply := execFailover(s, [][]byte{[]byte("ABORT")})
 	if string(reply.ToBytes()) != "+OK\r\n" {
@@ -68,6 +76,7 @@ func TestStandaloneFailoverAbort(t *testing.T) {
 
 func TestReplid2SetOnPromotion(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	oldReplid := "oldmasterreplid0000000000000000000000000"
 	s.promoteToMaster(oldReplid, 12345)
 
@@ -85,6 +94,7 @@ func TestReplid2SetOnPromotion(t *testing.T) {
 
 func TestRoleFlipsToMasterOnPromotion(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	// Simulate being a slave first
 	s.role = slaveRole
 	s.promoteToMaster("someOldReplid", 100)
@@ -95,6 +105,7 @@ func TestRoleFlipsToMasterOnPromotion(t *testing.T) {
 
 func TestPromoteToMasterGeneratesNewReplid(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	s.masterStatus.mu.RLock()
 	origReplid := s.masterStatus.replId
 	s.masterStatus.mu.RUnlock()
@@ -118,6 +129,7 @@ func TestPromoteToMasterGeneratesNewReplid(t *testing.T) {
 // sub-replicas can partial-resync after a failover.
 func TestSlaveOfNoneSetsReplid2(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	// Simulate being a slave replicating from a master with a known replid.
 	oldMasterReplid := "oldmasterreplid0000000000000000000000000"
 	s.role = slaveRole

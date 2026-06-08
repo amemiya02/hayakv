@@ -9,6 +9,7 @@ import (
 
 func TestPFAddCount(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("PFADD", "hll", "a", "b", "c"))
 	ret := s.Exec(conn, utils.ToCmdLine("PFCOUNT", "hll"))
@@ -26,6 +27,7 @@ func TestPFAddCount(t *testing.T) {
 
 func TestPFMerge(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("PFADD", "a", "x", "y"))
 	s.Exec(conn, utils.ToCmdLine("PFADD", "b", "y", "z"))
@@ -39,7 +41,9 @@ func TestPFMerge(t *testing.T) {
 
 func TestPFAddNoArgs(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
+	s.Exec(conn, utils.ToCmdLine("FLUSHDB"))
 	// PFADD with no elements creates the key
 	ret := s.Exec(conn, utils.ToCmdLine("PFADD", "hll"))
 	if string(ret.ToBytes()) != ":1\r\n" {

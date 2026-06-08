@@ -249,6 +249,7 @@ func TestSlowLogger_HandleSlowlogCommand(t *testing.T) {
 
 func TestSlowlogHelp(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 	r := s.Exec(c, utils.ToCmdLine("SLOWLOG", "HELP"))
 	body := string(r.ToBytes())
@@ -265,6 +266,7 @@ func TestSlowlogHelp(t *testing.T) {
 
 func TestSlowlogLiveConfig(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 	// Enable slowlog: set max-len and threshold
 	s.Exec(c, utils.ToCmdLine("CONFIG", "SET", "slowlog-max-len", "128"))

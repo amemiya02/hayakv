@@ -13,6 +13,7 @@ import (
 func TestDebugReloadPreservesDigest(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "a", "1"))
 	s.Exec(conn, utils.ToCmdLine("RPUSH", "l", "x", "y"))
@@ -28,6 +29,7 @@ func TestDebugReloadPreservesDigest(t *testing.T) {
 func TestDebugDigest(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "k", "v"))
 	r := s.Exec(conn, utils.ToCmdLine("DEBUG", "DIGEST"))
@@ -45,6 +47,7 @@ func TestDebugDigest(t *testing.T) {
 func TestDebugDigestValue(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "k1", "v1"))
 	s.Exec(conn, utils.ToCmdLine("SET", "k2", "v2"))
@@ -62,6 +65,7 @@ func TestDebugDigestValue(t *testing.T) {
 func TestDebugError(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	if r := s.Exec(conn, utils.ToCmdLine("DEBUG", "SET-ACTIVE-EXPIRE", "0")); string(r.ToBytes()) != "+OK\r\n" {
 		t.Fatalf("SET-ACTIVE-EXPIRE = %q", r.ToBytes())
@@ -74,6 +78,7 @@ func TestDebugError(t *testing.T) {
 func TestDebugSleep(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("DEBUG", "SLEEP", "0"))
 	if string(r.ToBytes()) != "+OK\r\n" {
@@ -84,6 +89,7 @@ func TestDebugSleep(t *testing.T) {
 func TestDebugPopulate(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("DEBUG", "POPULATE", "10", "test:", "5"))
 	if string(r.ToBytes()) != "+OK\r\n" {
@@ -99,6 +105,7 @@ func TestDebugPopulate(t *testing.T) {
 func TestDebugProtocol(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	types := []string{"STRING", "INTEGER", "DOUBLE", "BIGNUM", "NULL", "ARRAY", "SET", "MAP", "TRUE", "FALSE", "ERR", "PUSH"}
@@ -113,6 +120,7 @@ func TestDebugProtocol(t *testing.T) {
 func TestDebugObject(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	s.Exec(conn, utils.ToCmdLine("SET", "mykey", "myvalue"))
 	r := s.Exec(conn, utils.ToCmdLine("DEBUG", "OBJECT", "mykey"))
@@ -131,6 +139,7 @@ func TestDebugObject(t *testing.T) {
 func TestDebugQuicklistPackedThreshold(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("DEBUG", "QUICKLIST-PACKED-THRESHOLD", "128"))
 	if string(r.ToBytes()) != "+OK\r\n" {
@@ -141,6 +150,7 @@ func TestDebugQuicklistPackedThreshold(t *testing.T) {
 func TestDebugChangeReplID(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("DEBUG", "CHANGE-REPL-ID"))
 	if string(r.ToBytes()) != "+OK\r\n" {
@@ -151,6 +161,7 @@ func TestDebugChangeReplID(t *testing.T) {
 func TestDebugNoSubcommand(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("DEBUG"))
 	if !protocol.IsErrorReply(r) {
@@ -161,6 +172,7 @@ func TestDebugNoSubcommand(t *testing.T) {
 func TestDebugUnknownSubcommand(t *testing.T) {
 	config.Properties = &config.ServerProperties{Databases: 16}
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("DEBUG", "NOSUCH"))
 	if !protocol.IsErrorReply(r) {

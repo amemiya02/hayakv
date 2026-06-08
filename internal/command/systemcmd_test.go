@@ -66,6 +66,7 @@ func TestInfo(t *testing.T) {
 
 func TestInfoHasSuiteRequiredFields(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	body := string(Info(s, nil).ToBytes())
 	for _, f := range []string{"run_id:", "tcp_port:", "uptime_in_seconds:", "redis_version:",
 		"io_threads_active:", "rdb_bgsave_in_progress:", "loading:", "aof_enabled:", "maxmemory_policy:"} {
@@ -77,6 +78,7 @@ func TestInfoHasSuiteRequiredFields(t *testing.T) {
 
 func TestDbSize(t *testing.T) {
 	c := connection.NewFakeConn()
+	testServer.Exec(c, utils.ToCmdLine("FLUSHDB"))
 	rand.NewSource(time.Now().UnixNano())
 	randomNum := rand.Intn(10) + 1
 	for i := 0; i < randomNum; i++ {

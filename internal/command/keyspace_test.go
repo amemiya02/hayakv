@@ -121,6 +121,7 @@ func TestNotifyFlagsIndividualBits(t *testing.T) {
 
 func TestEmitPublishesBothChannels(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	config.Properties.NotifyKeyspaceEvents = "KEA"
 	defer func() { config.Properties.NotifyKeyspaceEvents = "" }()
 
@@ -162,6 +163,7 @@ func TestEmitPublishesBothChannels(t *testing.T) {
 
 func TestEmitDisabledWhenNoFlags(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	config.Properties.NotifyKeyspaceEvents = ""
 	defer func() { config.Properties.NotifyKeyspaceEvents = "" }()
 
@@ -182,6 +184,7 @@ func TestEmitDisabledWhenNoFlags(t *testing.T) {
 
 func TestEmitSkipsWrongClass(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	// Only enable keyevent + list (not string)
 	config.Properties.NotifyKeyspaceEvents = "El"
 	defer func() { config.Properties.NotifyKeyspaceEvents = "" }()
@@ -207,6 +210,7 @@ func TestEmitSkipsWrongClass(t *testing.T) {
 
 func TestEmitKeyspaceOnly(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	// Only keyspace channel, not keyevent
 	config.Properties.NotifyKeyspaceEvents = "K$"
 	defer func() { config.Properties.NotifyKeyspaceEvents = "" }()
@@ -248,6 +252,7 @@ func TestValidNotifyFlags(t *testing.T) {
 
 func TestConfigSetNotifyKeyspaceEvents(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 	defer func() { config.Properties.NotifyKeyspaceEvents = "" }()
 

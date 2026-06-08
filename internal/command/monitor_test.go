@@ -12,6 +12,7 @@ import (
 
 func TestMonitorRepliesOK(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	mon := connection.NewFakeConn()
 
 	result := s.Exec(mon, utils.ToCmdLine("MONITOR"))
@@ -25,6 +26,7 @@ func TestMonitorFeeds(t *testing.T) {
 	monitorConnsMu.Unlock()
 
 	s := NewStandaloneServer()
+	defer s.Close()
 	mon := connection.NewFakeConn()
 
 	// Start monitoring
@@ -50,6 +52,7 @@ func TestMonitorFeeds(t *testing.T) {
 
 func TestResetReplies(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	result := s.Exec(c, utils.ToCmdLine("RESET"))
@@ -58,6 +61,7 @@ func TestResetReplies(t *testing.T) {
 
 func TestResetClearsDB(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	// Select DB 3
@@ -75,6 +79,7 @@ func TestResetClearsDB(t *testing.T) {
 
 func TestResetClearsMultiState(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	// Enter MULTI
@@ -92,6 +97,7 @@ func TestResetClearsMultiState(t *testing.T) {
 
 func TestResetClearsClientName(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	c := connection.NewFakeConn()
 
 	c.SetClientName("myname")
@@ -113,6 +119,7 @@ func TestMonitorRemovedOnClose(t *testing.T) {
 	monitorConnsMu.Unlock()
 
 	s := NewStandaloneServer()
+	defer s.Close()
 	mon := connection.NewFakeConn()
 
 	// Register monitor

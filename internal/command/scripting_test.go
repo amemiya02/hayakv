@@ -11,6 +11,7 @@ import (
 
 func TestEvalSetGetViaScript(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("EVAL", "redis.call('set',KEYS[1],ARGV[1]) return redis.call('get',KEYS[1])", "1", "k", "v"))
 	asserts.AssertBulkReply(t, r, "v")
@@ -22,6 +23,7 @@ func TestEvalSetGetViaScript(t *testing.T) {
 
 func TestEvalReturnNumber(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("EVAL", "return 42", "0"))
 	if string(r.ToBytes()) != ":42\r\n" {
@@ -31,6 +33,7 @@ func TestEvalReturnNumber(t *testing.T) {
 
 func TestEvalReturnNil(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("EVAL", "return nil", "0"))
 	if string(r.ToBytes()) != "$-1\r\n" {
@@ -40,6 +43,7 @@ func TestEvalReturnNil(t *testing.T) {
 
 func TestEvalSyntaxError(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("EVAL", "invalid lua!!", "0"))
 	if !strings.HasPrefix(string(r.ToBytes()), "-") {
@@ -49,6 +53,7 @@ func TestEvalSyntaxError(t *testing.T) {
 
 func TestEvalArgErrors(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// too few args
@@ -70,6 +75,7 @@ func TestEvalArgErrors(t *testing.T) {
 
 func TestEvalShaNoScript(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	r := s.Exec(conn, utils.ToCmdLine("EVALSHA", strings.Repeat("0", 40), "0"))
 	if !strings.HasPrefix(string(r.ToBytes()), "-NOSCRIPT") {
@@ -79,6 +85,7 @@ func TestEvalShaNoScript(t *testing.T) {
 
 func TestEvalShaAfterLoad(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// load script
@@ -101,6 +108,7 @@ func TestEvalShaAfterLoad(t *testing.T) {
 
 func TestScriptLoadExistsFlush(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// load
@@ -137,6 +145,7 @@ func TestScriptLoadExistsFlush(t *testing.T) {
 
 func TestScriptArgErrors(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// no subcommand
@@ -154,6 +163,7 @@ func TestScriptArgErrors(t *testing.T) {
 
 func TestScriptKill(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 	// Kill sets a flag in the engine; it always succeeds in the gopher-lua implementation.
 	r := s.Exec(conn, utils.ToCmdLine("SCRIPT", "KILL"))
@@ -164,6 +174,7 @@ func TestScriptKill(t *testing.T) {
 
 func TestEvalRoRejectsWrite(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// EVAL_RO calling SET must fail
@@ -190,6 +201,7 @@ func TestEvalRoRejectsWrite(t *testing.T) {
 
 func TestEvalShaRoRejectsWrite(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// Load a write script

@@ -27,6 +27,7 @@ func TestLoadRDB(t *testing.T) {
 		RDBFilename:    rdbPath,
 	}
 	gen := NewStandaloneServer()
+	defer gen.Close()
 	conn := connection.NewFakeConn()
 	asserts.AssertNotError(t, gen.Exec(conn, utils.ToCmdLine("Set", "str", "str")))
 	asserts.AssertNotError(t, gen.Exec(conn, utils.ToCmdLine("RPush", "list", "1", "2", "3", "4")))
@@ -41,6 +42,7 @@ func TestLoadRDB(t *testing.T) {
 		RDBFilename: rdbPath,
 	}
 	rdbDB := NewStandaloneServer()
+	defer rdbDB.Close()
 	result := rdbDB.Exec(conn, utils.ToCmdLine("Get", "str"))
 	asserts.AssertBulkReply(t, result, "str")
 	result = rdbDB.Exec(conn, utils.ToCmdLine("LRange", "list", "0", "-1"))
@@ -58,6 +60,7 @@ func TestLoadRDB(t *testing.T) {
 		RDBFilename: "noexists.rdb",
 	}
 	rdbDB = NewStandaloneServer()
+	defer rdbDB.Close()
 	result = rdbDB.Exec(conn, utils.ToCmdLine("Get", "str"))
 	asserts.AssertNullBulk(t, result)
 }
@@ -72,11 +75,13 @@ func TestServerFsyncAlways(t *testing.T) {
 	config.Properties.AppendFilename = aofFile.Name()
 	config.Properties.AppendFsync = aof.FsyncAlways
 	server := NewStandaloneServer()
+	defer server.Close()
 	conn := connection.NewFakeConn()
 	server.Exec(conn, utils.ToCmdLine("del", "1"))
 	ret := server.Exec(conn, utils.ToCmdLine("incr", "1"))
 	asserts.AssertNotError(t, ret)
 	reader := NewStandaloneServer()
+	defer reader.Close()
 	ret = reader.Exec(conn, utils.ToCmdLine("get", "1"))
 	asserts.AssertBulkReply(t, ret, "1")
 }
@@ -91,12 +96,14 @@ func TestServerFsyncEverySec(t *testing.T) {
 	config.Properties.AppendFilename = aofFile.Name()
 	config.Properties.AppendFsync = aof.FsyncEverySec
 	server := NewStandaloneServer()
+	defer server.Close()
 	conn := connection.NewFakeConn()
 	server.Exec(conn, utils.ToCmdLine("del", "1"))
 	ret := server.Exec(conn, utils.ToCmdLine("incr", "1"))
 	asserts.AssertNotError(t, ret)
 	time.Sleep(1500 * time.Millisecond)
 	reader := NewStandaloneServer()
+	defer reader.Close()
 	ret = reader.Exec(conn, utils.ToCmdLine("get", "1"))
 	asserts.AssertBulkReply(t, ret, "1")
 }

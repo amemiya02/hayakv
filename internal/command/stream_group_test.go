@@ -10,6 +10,7 @@ import (
 
 func TestXGroupReadAck(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// Add entries
@@ -52,6 +53,7 @@ func TestXGroupReadAck(t *testing.T) {
 
 func TestXGroupCreateDestroy(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// Create stream first
@@ -84,6 +86,7 @@ func TestXGroupCreateDestroy(t *testing.T) {
 
 func TestXGroupMKStream(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// XGROUP CREATE with MKSTREAM should create the stream
@@ -101,6 +104,7 @@ func TestXGroupMKStream(t *testing.T) {
 
 func TestXGroupCreateConsumer(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	s.Exec(conn, utils.ToCmdLine("XADD", "st", "1-0", "f", "v"))
@@ -121,6 +125,7 @@ func TestXGroupCreateConsumer(t *testing.T) {
 
 func TestXGroupDelConsumer(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	s.Exec(conn, utils.ToCmdLine("XADD", "st", "1-0", "f", "v"))
@@ -144,6 +149,7 @@ func TestXGroupDelConsumer(t *testing.T) {
 
 func TestXGroupSetID(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	s.Exec(conn, utils.ToCmdLine("XADD", "st", "1-0", "f", "v"))
@@ -168,6 +174,7 @@ func TestXGroupSetID(t *testing.T) {
 
 func TestXPendingExtended(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	s.Exec(conn, utils.ToCmdLine("XADD", "st", "1-0", "f", "v"))
@@ -205,6 +212,7 @@ func TestXPendingExtended(t *testing.T) {
 
 func TestXReadGroupPending(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	s.Exec(conn, utils.ToCmdLine("XADD", "st", "1-0", "f", "v"))
@@ -232,6 +240,7 @@ func TestXReadGroupPending(t *testing.T) {
 
 func TestXInfo(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	s.Exec(conn, utils.ToCmdLine("XADD", "st", "1-0", "f", "v"))
@@ -282,6 +291,7 @@ func TestXInfo(t *testing.T) {
 
 func TestXClaim(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	s.Exec(conn, utils.ToCmdLine("XADD", "st", "1-0", "f", "v"))
@@ -311,6 +321,7 @@ func TestXClaim(t *testing.T) {
 
 func TestXReadGroupNoStream(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	// XGROUP CREATE on non-existent key without MKSTREAM should fail
@@ -329,6 +340,7 @@ func TestXReadGroupNoStream(t *testing.T) {
 
 func TestXAutoClaim(t *testing.T) {
 	s := NewStandaloneServer()
+	defer s.Close()
 	conn := connection.NewFakeConn()
 
 	s.Exec(conn, utils.ToCmdLine("XADD", "st", "1-0", "f", "v"))

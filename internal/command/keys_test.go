@@ -272,6 +272,7 @@ func TestKeys(t *testing.T) {
 func TestCopy(t *testing.T) {
 	testDB.Flush()
 	testMDB := NewStandaloneServer()
+	defer testMDB.Close()
 	srcKey := utils.RandString(10)
 	destKey := "from:" + srcKey
 	value := utils.RandString(10)
