@@ -222,3 +222,31 @@ func TestTCLManifestCoversEveryInScopeFile(t *testing.T) {
 		}
 	}
 }
+
+// TestManifestNoUnexplainedGaps ensures every manifest entry is either pass,
+// partial with documented skips, or excluded with a reason. No entry should
+// have an unexplained status.
+func TestManifestNoUnexplainedGaps(t *testing.T) {
+	manifestPath := filepath.Join("manifest.yaml")
+	m := loadManifest(t, manifestPath)
+
+	for f, e := range m {
+		switch e.Status {
+		case "pass":
+			// OK
+		case "partial":
+			if len(e.Skips) == 0 {
+				t.Errorf("%s is partial but lists no skipped tests", f)
+			}
+			if e.Reason == "" {
+				t.Errorf("%s is partial but has no reason", f)
+			}
+		case "excluded":
+			if e.Reason == "" {
+				t.Errorf("%s is excluded but has no reason", f)
+			}
+		default:
+			t.Errorf("%s has invalid status %q", f, e.Status)
+		}
+	}
+}
