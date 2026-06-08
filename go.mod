@@ -9,6 +9,7 @@ require (
 	github.com/panjf2000/gnet/v2 v2.7.2
 	github.com/redis/go-redis/v9 v9.20.0
 	github.com/yuin/gopher-lua v1.1.2
+	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/sys v0.30.0
 	pgregory.net/rapid v1.3.0
 )
@@ -23,6 +24,7 @@ require (
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
 	github.com/hashicorp/go-msgpack/v2 v2.1.1 // indirect
 	github.com/hashicorp/golang-lru v0.5.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/panjf2000/ants/v2 v2.11.0 // indirect

@@ -871,8 +871,8 @@ func TestMSetEX(t *testing.T) {
 	testDB.Flush()
 	// MSETEX numkeys k1 v1 k2 v2
 	actual := testDB.Exec(nil, utils.ToCmdLine("MSETEX", "2", "k1", "v1", "k2", "v2"))
-	if string(actual.ToBytes()) != "+OK\r\n" {
-		t.Fatal("MSETEX should return OK")
+	if string(actual.ToBytes()) != ":1\r\n" {
+		t.Fatal("MSETEX should return :1")
 	}
 
 	// Verify values
@@ -890,8 +890,8 @@ func TestMSetEXWithTTL(t *testing.T) {
 	testDB.Flush()
 	// MSETEX numkeys k1 v1 k2 v2 EX 10
 	actual := testDB.Exec(nil, utils.ToCmdLine("MSETEX", "2", "k1", "v1", "k2", "v2", "EX", "10"))
-	if string(actual.ToBytes()) != "+OK\r\n" {
-		t.Fatal("MSETEX with EX should return OK")
+	if string(actual.ToBytes()) != ":1\r\n" {
+		t.Fatal("MSETEX with EX should return :1")
 	}
 
 	// Verify TTL exists

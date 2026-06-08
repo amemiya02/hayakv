@@ -3,6 +3,8 @@ package diff
 import (
 	"bytes"
 	"testing"
+
+	"github.com/amemiya02/hayakv/internal/lib/digest"
 )
 
 // normalizeTTL clamps a positive integer reply to "1" so that
@@ -87,6 +89,52 @@ func semantics8xCorpus() []Scenario {
 		{Name: "delex_bad_condition", Commands: []Command{
 			{Args: []string{"SET", "a", "1"}},
 			{Args: []string{"DELEX", "a", "BADCMD", "x"}},
+		}},
+		// DELEX IFDEQ/IFDNE — digest-based conditional delete
+		{Name: "delex_ifdeq_matching", Commands: []Command{
+			{Args: []string{"SET", "a", "hello"}},
+			{Args: []string{"DELEX", "a", "IFDEQ", digest.ValueDigest([]byte("hello"))}},
+		}},
+		{Name: "delex_ifdeq_non_matching", Commands: []Command{
+			{Args: []string{"SET", "a", "hello"}},
+			{Args: []string{"DELEX", "a", "IFDEQ", digest.ValueDigest([]byte("wrong"))}},
+			{Args: []string{"GET", "a"}},
+		}},
+		{Name: "delex_ifdne_differing", Commands: []Command{
+			{Args: []string{"SET", "a", "hello"}},
+			{Args: []string{"DELEX", "a", "IFDNE", digest.ValueDigest([]byte("other"))}},
+		}},
+		{Name: "delex_ifdne_matching", Commands: []Command{
+			{Args: []string{"SET", "a", "hello"}},
+			{Args: []string{"DELEX", "a", "IFDNE", digest.ValueDigest([]byte("hello"))}},
+			{Args: []string{"GET", "a"}},
+		}},
+
+		// SET IFDEQ/IFDNE — digest-based conditional write
+		{Name: "set_ifdeq_matching", Commands: []Command{
+			{Args: []string{"SET", "k", "hello"}},
+			{Args: []string{"SET", "k", "world", "IFDEQ", digest.ValueDigest([]byte("hello"))}},
+			{Args: []string{"GET", "k"}},
+		}},
+		{Name: "set_ifdeq_non_matching", Commands: []Command{
+			{Args: []string{"SET", "k", "hello"}},
+			{Args: []string{"SET", "k", "world", "IFDEQ", digest.ValueDigest([]byte("wrong"))}},
+			{Args: []string{"GET", "k"}},
+		}},
+		{Name: "set_ifdne_absent", Commands: []Command{
+			{Args: []string{"DEL", "k"}},
+			{Args: []string{"SET", "k", "val", "IFDNE", digest.ValueDigest([]byte("anything"))}},
+			{Args: []string{"GET", "k"}},
+		}},
+		{Name: "set_ifdne_differing", Commands: []Command{
+			{Args: []string{"SET", "k", "hello"}},
+			{Args: []string{"SET", "k", "world", "IFDNE", digest.ValueDigest([]byte("other"))}},
+			{Args: []string{"GET", "k"}},
+		}},
+		{Name: "set_ifdne_matching", Commands: []Command{
+			{Args: []string{"SET", "k", "hello"}},
+			{Args: []string{"SET", "k", "world", "IFDNE", digest.ValueDigest([]byte("hello"))}},
+			{Args: []string{"GET", "k"}},
 		}},
 
 		// MSETEX numkeys k v [k v…] [EX s]

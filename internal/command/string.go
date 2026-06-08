@@ -1042,6 +1042,7 @@ func execMSetEX(db *DB, args [][]byte) redis.Reply {
 	// Set key-value pairs
 	kvArgs := args[1:kvEnd]
 	keys := make([]string, numkeys)
+	applied := true
 	for i := 0; i < numkeys; i++ {
 		keys[i] = string(kvArgs[2*i])
 		value := kvArgs[2*i+1]
@@ -1050,10 +1051,18 @@ func execMSetEX(db *DB, args [][]byte) redis.Reply {
 		case upsertPolicy:
 			db.PutEntity(keys[i], entity)
 		case insertPolicy:
-			db.PutIfAbsent(keys[i], entity)
+			if db.PutIfAbsent(keys[i], entity) == 0 {
+				applied = false
+			}
 		case updatePolicy:
-			db.PutIfExists(keys[i], entity)
+			if db.PutIfExists(keys[i], entity) == 0 {
+				applied = false
+			}
 		}
+	}
+
+	if !applied {
+		return protocol.MakeIntReply(0)
 	}
 
 	// Apply TTL
@@ -1072,7 +1081,7 @@ func execMSetEX(db *DB, args [][]byte) redis.Reply {
 	// ttl == -1 (KEEPTTL) or unlimitedTTL (0): don't touch TTL
 
 	db.addAof(utils.ToCmdLine3("msetex", args...))
-	return &protocol.OkReply{}
+	return protocol.MakeIntReply(1)
 }
 
 func init() {

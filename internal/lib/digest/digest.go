@@ -1,32 +1,21 @@
 // Package digest provides value digests for conditional commands (IFDEQ/IFDNE).
-// Uses XXH64 (cespare/xxhash/v2). Redis 8.4 uses XXH3-128; the hex length
-// differs but the semantics (stable, fast, non-cryptographic) are the same.
-// If exact parity is needed, swap the hash implementation here.
+// Uses XXH3-128 (zeebo/xxh3) to match Redis 8.4's digest algorithm.
 package digest
 
 import (
+	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 
-	"github.com/cespare/xxhash/v2"
+	"github.com/zeebo/xxh3"
 )
 
-// ValueDigest returns the lowercase hex digest of b.
+// ValueDigest returns the lowercase 32-char hex XXH3-128 digest of b.
 func ValueDigest(b []byte) string {
-	h := xxhash.Sum64(b)
-	// xxhash.Sum64 returns 8 bytes; format as 16-char hex
-	return fmt.Sprintf("%016x", h)
-}
-
-// ValueDigestBytes is like ValueDigest but returns raw bytes (8 bytes, big-endian).
-func ValueDigestBytes(b []byte) []byte {
-	h := xxhash.Sum64(b)
-	buf := make([]byte, 8)
-	for i := 7; i >= 0; i-- {
-		buf[i] = byte(h)
-		h >>= 8
-	}
-	return buf
+	h := xxh3.Hash128(b)
+	var buf [16]byte
+	binary.BigEndian.PutUint64(buf[0:8], h.Hi)
+	binary.BigEndian.PutUint64(buf[8:16], h.Lo)
+	return hex.EncodeToString(buf[:])
 }
 
 // FromHex decodes a hex digest string. Returns nil if invalid.
