@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/hayakv/config"
+	"github.com/amemiya02/hayakv/internal/acl"
 	"github.com/amemiya02/hayakv/internal/iface"
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
@@ -74,6 +75,9 @@ type Server struct {
 
 	// latencyMon records latency events for LATENCY command.
 	latencyMon *latencyMonitor
+
+	// acl manages the ACL user registry.
+	acl *acl.ACL
 }
 
 // DisableCron prevents StartCron from launching a background goroutine.
@@ -159,6 +163,9 @@ func NewStandaloneServer() *Server {
 	}
 	server.scriptEngine = iscript.NewEngine(server.ExecFromScript, busyMs)
 
+	// initialize ACL
+	server.acl = acl.NewACL()
+
 	return server
 }
 
@@ -190,6 +197,27 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 	if !isAuthenticated(c) {
 		return protocol.MakeErrReply("NOAUTH Authentication required")
 	}
+
+	// ACL command dispatch (before normal commands)
+	if cmdName == "acl" {
+		dbIndex := c.GetDBIndex()
+		selectedDB, errReply := server.selectDB(dbIndex)
+		if errReply != nil {
+			return errReply
+		}
+		return execACL(selectedDB, cmdLine[1:])
+	}
+
+	// ACL enforcement (fast path: default user with all perms skips check)
+	if server.acl != nil {
+		user := server.acl.DefaultUser() // Will be replaced with per-connection user in Task 4
+		if user != nil && !user.IsDefaultAllPerms() {
+			if !user.CanRunCommand(cmdName) {
+				return protocol.MakeErrReply("NOPERM User " + user.Name + " has no permissions to run the '" + cmdName + "' command")
+			}
+		}
+	}
+
 	// info
 	if cmdName == "info" {
 		return Info(server, cmdLine[1:])

@@ -29,6 +29,7 @@ type commandExtra struct {
 	keyStep     int
 	notifyClass int
 	notifyEvent string
+	aclCats     []string
 }
 
 const flagWrite = 0

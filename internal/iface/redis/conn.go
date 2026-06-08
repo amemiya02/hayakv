@@ -85,4 +85,8 @@ type Connection interface {
 	SetBcastPrefixes([]string)
 	CachingNext() bool
 	SetCachingNext(bool)
+
+	// ACL user tracking
+	SetUser(u interface{})
+	User() interface{}
 }

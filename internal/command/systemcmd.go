@@ -83,18 +83,34 @@ func Info(db *Server, args [][]byte) redis.Reply {
 
 // Auth validate client's password
 func Auth(c redis.Connection, args [][]byte) redis.Reply {
-	if len(args) != 1 {
-		return protocol.MakeErrReply("ERR wrong number of arguments for 'auth' command")
+	if len(args) == 1 {
+		// Legacy 1-arg AUTH
+		if config.Properties.RequirePass == "" {
+			return protocol.MakeErrReply("ERR Client sent AUTH, but no password is set")
+		}
+		passwd := string(args[0])
+		c.SetPassword(passwd)
+		if config.Properties.RequirePass != passwd {
+			return protocol.MakeErrReply("ERR invalid password")
+		}
+		return &protocol.OkReply{}
 	}
-	if config.Properties.RequirePass == "" {
-		return protocol.MakeErrReply("ERR Client sent AUTH, but no password is set")
+	if len(args) == 2 {
+		// 2-arg AUTH: username password
+		username := string(args[0])
+		password := string(args[1])
+		// Wire to ACL registry (will be done in Task 4)
+		// For now, fall back to legacy behavior
+		if username == "default" && config.Properties.RequirePass != "" {
+			c.SetPassword(password)
+			if config.Properties.RequirePass != password {
+				return protocol.MakeErrReply("WRONGPASS invalid username-password pair or user is disabled.")
+			}
+			return &protocol.OkReply{}
+		}
+		return protocol.MakeErrReply("WRONGPASS invalid username-password pair or user is disabled.")
 	}
-	passwd := string(args[0])
-	c.SetPassword(passwd)
-	if config.Properties.RequirePass != passwd {
-		return protocol.MakeErrReply("ERR invalid password")
-	}
-	return &protocol.OkReply{}
+	return protocol.MakeErrReply("ERR wrong number of arguments for 'auth' command")
 }
 
 func isAuthenticated(c redis.Connection) bool {

@@ -78,6 +78,9 @@ type Connection struct {
 	bcastMode     bool     // BCAST mode
 	bcastPrefixes []string // BCAST prefixes
 	cachingNext   bool     // next command should be cached (OPTIN/OPTOUT gating)
+
+	// user tracks the ACL user for this connection.
+	user interface{} // *acl.User — use interface{} to avoid import cycle
 }
 
 var connPool = sync.Pool{
@@ -467,3 +470,9 @@ func (c *Connection) CachingNext() bool { return c.cachingNext }
 
 // SetCachingNext sets the caching-next flag for OPTIN/OPTOUT gating.
 func (c *Connection) SetCachingNext(v bool) { c.cachingNext = v }
+
+// SetUser sets the ACL user for this connection.
+func (c *Connection) SetUser(u interface{}) { c.user = u }
+
+// User returns the ACL user for this connection.
+func (c *Connection) User() interface{} { return c.user }
