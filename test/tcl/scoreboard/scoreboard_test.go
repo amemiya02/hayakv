@@ -74,6 +74,16 @@ func TestAppendCreatesFile(t *testing.T) {
 	}
 }
 
+func TestRecordCarriesBench(t *testing.T) {
+	rec := Record{Date: "2026-06-07", Bench: map[string]float64{
+		"set_p1_ops": 110000, "set_p100_ops": 850000, "get_p1_ops": 115000,
+	}}
+	got, err := ParseRecord(rec.JSONLine())
+	if err != nil || got.Bench["set_p100_ops"] != 850000 {
+		t.Fatalf("bench round-trip failed: %v %+v", err, got)
+	}
+}
+
 func splitLines(s string) []string {
 	var lines []string
 	start := 0

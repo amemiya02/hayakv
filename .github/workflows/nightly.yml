@@ -47,6 +47,10 @@ jobs:
         run: bash test/tcl/run_tcl.sh
         continue-on-error: true
 
+      - name: Run benchmarks
+        run: HAYAKV_BENCH=1 go test ./test/bench -run TestBenchVsRedis -count=1 -v
+        continue-on-error: true
+
       - name: Append scoreboard row
         run: |
           go run ./test/tcl/scoreboard/cmd

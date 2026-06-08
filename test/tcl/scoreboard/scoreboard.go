@@ -10,15 +10,16 @@ import (
 
 // Record holds one nightly KPI snapshot.
 type Record struct {
-	Date                string  `json:"date"`
-	TCLPassRate         float64 `json:"tcl_pass_rate"`
-	TCLFilesPass        int     `json:"tcl_files_pass"`
-	TCLFilesPartial     int     `json:"tcl_files_partial"`
-	TCLFilesExcluded    int     `json:"tcl_files_excluded"`
-	CommandsImplemented int     `json:"commands_implemented"`
-	ConfigParams        int     `json:"config_params"`
-	DiffCorpusScenarios int     `json:"diff_corpus_scenarios"`
-	DiffExclusions      int     `json:"diff_exclusions"`
+	Date                string             `json:"date"`
+	TCLPassRate         float64            `json:"tcl_pass_rate"`
+	TCLFilesPass        int                `json:"tcl_files_pass"`
+	TCLFilesPartial     int                `json:"tcl_files_partial"`
+	TCLFilesExcluded    int                `json:"tcl_files_excluded"`
+	CommandsImplemented int                `json:"commands_implemented"`
+	ConfigParams        int                `json:"config_params"`
+	DiffCorpusScenarios int                `json:"diff_corpus_scenarios"`
+	DiffExclusions      int                `json:"diff_exclusions"`
+	Bench               map[string]float64 `json:"bench,omitempty"`
 }
 
 // JSONLine serialises the record as a single JSON line (no trailing newline).
