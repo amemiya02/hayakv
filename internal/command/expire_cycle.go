@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/hayakv/config"
+	"github.com/amemiya02/hayakv/internal/object"
 )
 
 // activeExpireConfig tunes one active-expire pass (mirrors Redis
@@ -90,6 +91,53 @@ func (db *DB) expireIfNeeded(key string) bool {
 // reaps a key (Redis propagates an explicit DEL for deterministic replication).
 func toExpireDelAof(key string) CmdLine {
 	return CmdLine{[]byte("DEL"), []byte(key)}
+}
+
+// purgeHashFieldExpire checks if the key holds a hash and purges any expired
+// fields. If all fields are removed the key itself is deleted. Returns the
+// number of fields purged.
+func (db *DB) purgeHashFieldExpire(key string) int {
+	entity, ok := db.getEntityNoTouch(key)
+	if !ok {
+		return 0
+	}
+	var h *object.Hash
+	switch v := entity.Data.(type) {
+	case *object.Robj:
+		if v.Type != object.TypeHash {
+			return 0
+		}
+		h = v.Value().(*object.Hash)
+	case *object.Hash:
+		h = v
+	default:
+		return 0
+	}
+
+	if !h.HasFieldExpiries() {
+		return 0
+	}
+
+	purged := h.PurgeExpiredFields(time.Now().UnixMilli())
+	for _, field := range purged {
+		if db.server != nil {
+			db.server.notifyKeyspaceEvent(db.index, notifyHash, "hexpired", key)
+		}
+		_ = field // field name available for AOF propagation if needed later
+	}
+	if h.Len() == 0 {
+		db.Remove(key)
+	}
+	return len(purged)
+}
+
+// activeHashFieldExpireCycle samples random keys and purges expired hash fields.
+// This complements the key-level active expire by reaping individual field TTLs.
+func (db *DB) activeHashFieldExpireCycle() {
+	keys := db.data.RandomDistinctKeys(activeExpireKeysPerLoop)
+	for _, key := range keys {
+		db.purgeHashFieldExpire(key)
+	}
 }
 
 // serverCronPeriod returns the tick interval derived from config hz.

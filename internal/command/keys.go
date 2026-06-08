@@ -158,57 +158,85 @@ func execRenameNx(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeIntReply(1)
 }
 
-// expire option constants
+// expire option bit-flags (combinable: XX+GT, XX+LT are valid)
 const (
-	expireOptionNone = iota
-	expireOptionNX
-	expireOptionXX
-	expireOptionGT
-	expireOptionLT
+	expireOptNX = 1 << iota
+	expireOptXX
+	expireOptGT
+	expireOptLT
 )
 
-func parseExpireOption(args [][]byte) (int, [][]byte) {
-	if len(args) == 0 {
-		return expireOptionNone, args
+// parseExpireOption parses 0-2 EXPIRE options from args.
+// Redis compatibility matrix:
+//
+//	NX is incompatible with XX, GT, LT
+//	GT is incompatible with LT
+//	XX may combine with GT or LT
+func parseExpireOption(args [][]byte) (int, redis.Reply) {
+	var opts int
+	for _, a := range args {
+		opt := strings.ToUpper(string(a))
+		var flag int
+		switch opt {
+		case "NX":
+			flag = expireOptNX
+		case "XX":
+			flag = expireOptXX
+		case "GT":
+			flag = expireOptGT
+		case "LT":
+			flag = expireOptLT
+		default:
+			return 0, protocol.MakeErrReply("ERR Unsupported option " + string(a))
+		}
+		opts |= flag // duplicate flags are idempotent
 	}
-	opt := strings.ToUpper(string(args[0]))
-	switch opt {
-	case "NX":
-		return expireOptionNX, args[1:]
-	case "XX":
-		return expireOptionXX, args[1:]
-	case "GT":
-		return expireOptionGT, args[1:]
-	case "LT":
-		return expireOptionLT, args[1:]
-	default:
-		return expireOptionNone, args
+	// Validate compatibility matrix
+	if opts&expireOptNX != 0 && opts&(expireOptXX|expireOptGT|expireOptLT) != 0 {
+		return 0, protocol.MakeErrReply("ERR NX and XX, GT or LT options at the same time are not compatible")
 	}
+	if opts&expireOptGT != 0 && opts&expireOptLT != 0 {
+		return 0, protocol.MakeErrReply("ERR GT and LT options at the same time are not compatible")
+	}
+	return opts, nil
 }
 
 // checkExpireOption returns true if the expire should proceed, false if it should return 0.
-func checkExpireOption(db *DB, key string, option int, expireAt time.Time) bool {
-	if option == expireOptionNone {
+// Options are evaluated as a set: NX requires no existing TTL; XX requires existing TTL;
+// GT requires new expiry > old; LT requires new expiry < old.
+// When XX is combined with GT/LT, both conditions must hold.
+func checkExpireOption(db *DB, key string, opts int, expireAt time.Time) bool {
+	if opts == 0 {
 		return true
 	}
 	raw, hasTTL := db.ttlMap.Get(key)
-	switch option {
-	case expireOptionNX:
-		return !hasTTL
-	case expireOptionXX:
-		return hasTTL
-	case expireOptionGT:
+	if opts&expireOptNX != 0 {
+		if hasTTL {
+			return false
+		}
+	}
+	if opts&expireOptXX != 0 {
+		if !hasTTL {
+			return false
+		}
+	}
+	if opts&expireOptGT != 0 {
 		if !hasTTL {
 			return false
 		}
 		expireTime := raw.(time.Time)
-		return expireAt.After(expireTime)
-	case expireOptionLT:
+		if !expireAt.After(expireTime) {
+			return false
+		}
+	}
+	if opts&expireOptLT != 0 {
 		if !hasTTL {
 			return true
 		}
 		expireTime := raw.(time.Time)
-		return expireAt.Before(expireTime)
+		if !expireAt.Before(expireTime) {
+			return false
+		}
 	}
 	return true
 }
@@ -230,7 +258,10 @@ func execExpire(db *DB, args [][]byte) redis.Reply {
 
 	expireAt := time.Now().Add(ttl)
 
-	option, _ := parseExpireOption(args[2:])
+	option, errReply := parseExpireOption(args[2:])
+	if errReply != nil {
+		return errReply
+	}
 	if !checkExpireOption(db, key, option, expireAt) {
 		return protocol.MakeIntReply(0)
 	}
@@ -255,7 +286,10 @@ func execExpireAt(db *DB, args [][]byte) redis.Reply {
 		return protocol.MakeIntReply(0)
 	}
 
-	option, _ := parseExpireOption(args[2:])
+	option, errReply := parseExpireOption(args[2:])
+	if errReply != nil {
+		return errReply
+	}
 	if !checkExpireOption(db, key, option, expireAt) {
 		return protocol.MakeIntReply(0)
 	}
@@ -299,7 +333,10 @@ func execPExpire(db *DB, args [][]byte) redis.Reply {
 
 	expireAt := time.Now().Add(ttl)
 
-	option, _ := parseExpireOption(args[2:])
+	option, errReply := parseExpireOption(args[2:])
+	if errReply != nil {
+		return errReply
+	}
 	if !checkExpireOption(db, key, option, expireAt) {
 		return protocol.MakeIntReply(0)
 	}
@@ -324,7 +361,10 @@ func execPExpireAt(db *DB, args [][]byte) redis.Reply {
 		return protocol.MakeIntReply(0)
 	}
 
-	option, _ := parseExpireOption(args[2:])
+	option, errReply := parseExpireOption(args[2:])
+	if errReply != nil {
+		return errReply
+	}
 	if !checkExpireOption(db, key, option, expireAt) {
 		return protocol.MakeIntReply(0)
 	}

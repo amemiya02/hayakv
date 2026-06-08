@@ -9,29 +9,39 @@ import (
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // getAsHash returns the Hash object for the given key, or nil if key does not exist.
 // Returns WrongTypeErrReply if the key is not a hash type.
+// Also performs lazy field expiry: purges any expired hash fields on access.
 func (db *DB) getAsHash(key string) (*object.Hash, protocol.ErrorReply) {
 	entity, exists := db.GetEntity(key)
 	if !exists {
 		return nil, nil
 	}
+	var h *object.Hash
 	switch v := entity.Data.(type) {
 	case *object.Robj:
 		if v.Type != object.TypeHash {
 			return nil, &protocol.WrongTypeErrReply{}
 		}
-		return v.Value().(*object.Hash), nil
+		h = v.Value().(*object.Hash)
 	case *object.Hash:
-		return v, nil
+		h = v
 	case Dict.Dict:
 		// RDB loader stores hash as Dict.Dict; wrap in Hash for unified access
-		return object.NewHashFromDict(v), nil
+		h = object.NewHashFromDict(v)
 	default:
 		return nil, &protocol.WrongTypeErrReply{}
 	}
+
+	// Lazy field expiry: purge expired fields on access.
+	if h.HasFieldExpiries() {
+		h.PurgeExpiredFields(time.Now().UnixMilli())
+	}
+
+	return h, nil
 }
 
 // getAsDict returns the hash as a Dict for backward compatibility.

@@ -74,24 +74,30 @@ func (f *fakeConn) IsMaster() bool                 { return false }
 func (f *fakeConn) Name() string                   { return "fake" }
 
 // client identification stubs
-func (f *fakeConn) ClientID() uint64     { return 0 }
-func (f *fakeConn) ClientName() string   { return "" }
-func (f *fakeConn) SetClientName(string) {}
-func (f *fakeConn) LibName() string      { return "" }
-func (f *fakeConn) SetLibName(string)    {}
-func (f *fakeConn) LibVer() string       { return "" }
-func (f *fakeConn) SetLibVer(string)     {}
-func (f *fakeConn) CreatedAt() time.Time { return time.Time{} }
-func (f *fakeConn) ReplyMode() int       { return 0 }
-func (f *fakeConn) SetReplyMode(int)     {}
-func (f *fakeConn) IsTracking() bool     { return false }
-func (f *fakeConn) SetTracking(bool)     {}
-func (f *fakeConn) TrackingMode() int    { return 0 }
-func (f *fakeConn) SetTrackingMode(int)  {}
-func (f *fakeConn) NoLoop() bool         { return false }
-func (f *fakeConn) SetNoLoop(bool)       {}
-func (f *fakeConn) RedirectID() uint64   { return 0 }
-func (f *fakeConn) SetRedirectID(uint64) {}
+func (f *fakeConn) ClientID() uint64          { return 0 }
+func (f *fakeConn) ClientName() string        { return "" }
+func (f *fakeConn) SetClientName(string)      {}
+func (f *fakeConn) LibName() string           { return "" }
+func (f *fakeConn) SetLibName(string)         {}
+func (f *fakeConn) LibVer() string            { return "" }
+func (f *fakeConn) SetLibVer(string)          {}
+func (f *fakeConn) CreatedAt() time.Time      { return time.Time{} }
+func (f *fakeConn) ReplyMode() int            { return 0 }
+func (f *fakeConn) SetReplyMode(int)          {}
+func (f *fakeConn) IsTracking() bool          { return false }
+func (f *fakeConn) SetTracking(bool)          {}
+func (f *fakeConn) TrackingMode() int         { return 0 }
+func (f *fakeConn) SetTrackingMode(int)       {}
+func (f *fakeConn) NoLoop() bool              { return false }
+func (f *fakeConn) SetNoLoop(bool)            {}
+func (f *fakeConn) RedirectID() uint64        { return 0 }
+func (f *fakeConn) SetRedirectID(uint64)      {}
+func (f *fakeConn) BcastMode() bool           { return false }
+func (f *fakeConn) SetBcastMode(bool)         {}
+func (f *fakeConn) BcastPrefixes() []string   { return nil }
+func (f *fakeConn) SetBcastPrefixes([]string) {}
+func (f *fakeConn) CachingNext() bool         { return false }
+func (f *fakeConn) SetCachingNext(bool)       {}
 
 // ---------- tests ----------
 

@@ -71,10 +71,13 @@ type Connection struct {
 	replyMode int
 
 	// tracking state (CLIENT TRACKING)
-	tracking     bool
-	trackingMode int    // 0=default, 1=optin, 2=optout
-	noLoop       bool   // NOLOOP flag
-	redirectID   uint64 // redirect target client ID (0 = self)
+	tracking      bool
+	trackingMode  int      // 0=default, 1=optin, 2=optout
+	noLoop        bool     // NOLOOP flag
+	redirectID    uint64   // redirect target client ID (0 = self)
+	bcastMode     bool     // BCAST mode
+	bcastPrefixes []string // BCAST prefixes
+	cachingNext   bool     // next command should be cached (OPTIN/OPTOUT gating)
 }
 
 var connPool = sync.Pool{
@@ -446,3 +449,21 @@ func (c *Connection) RedirectID() uint64 { return c.redirectID }
 
 // SetRedirectID sets the redirect target client ID.
 func (c *Connection) SetRedirectID(id uint64) { c.redirectID = id }
+
+// BcastMode returns whether BCAST tracking is enabled.
+func (c *Connection) BcastMode() bool { return c.bcastMode }
+
+// SetBcastMode sets BCAST tracking mode.
+func (c *Connection) SetBcastMode(v bool) { c.bcastMode = v }
+
+// BcastPrefixes returns the BCAST prefixes.
+func (c *Connection) BcastPrefixes() []string { return c.bcastPrefixes }
+
+// SetBcastPrefixes sets the BCAST prefixes.
+func (c *Connection) SetBcastPrefixes(prefixes []string) { c.bcastPrefixes = prefixes }
+
+// CachingNext returns whether the next command should cache.
+func (c *Connection) CachingNext() bool { return c.cachingNext }
+
+// SetCachingNext sets the caching-next flag for OPTIN/OPTOUT gating.
+func (c *Connection) SetCachingNext(v bool) { c.cachingNext = v }

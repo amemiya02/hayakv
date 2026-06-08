@@ -134,3 +134,9 @@ func (connStub) NoLoop() bool                   { return false }
 func (connStub) SetNoLoop(bool)                 {}
 func (connStub) RedirectID() uint64             { return 0 }
 func (connStub) SetRedirectID(uint64)           {}
+func (connStub) BcastMode() bool                { return false }
+func (connStub) SetBcastMode(bool)              {}
+func (connStub) BcastPrefixes() []string        { return nil }
+func (connStub) SetBcastPrefixes([]string)      {}
+func (connStub) CachingNext() bool              { return false }
+func (connStub) SetCachingNext(bool)            {}

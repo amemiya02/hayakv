@@ -24,6 +24,9 @@ func newCmdStats() *cmdStats {
 }
 
 func (s *cmdStats) record(name string, usec int64, isErr bool) {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c := s.cmds[name]
@@ -40,6 +43,9 @@ func (s *cmdStats) record(name string, usec int64, isErr bool) {
 }
 
 func (s *cmdStats) recordError(prefix string) {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	s.errs[prefix]++
 	s.mu.Unlock()

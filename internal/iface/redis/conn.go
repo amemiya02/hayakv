@@ -79,4 +79,10 @@ type Connection interface {
 	SetNoLoop(bool)
 	RedirectID() uint64
 	SetRedirectID(uint64)
+	BcastMode() bool
+	SetBcastMode(bool)
+	BcastPrefixes() []string
+	SetBcastPrefixes([]string)
+	CachingNext() bool
+	SetCachingNext(bool)
 }

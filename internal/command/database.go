@@ -204,10 +204,10 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 		// CLIENT TRACKING: track read keys, notify on writes
 		if c != nil && !protocol.IsErrorReply(result) {
 			if c.IsTracking() && len(write) == 0 && len(read) > 0 {
-				trackReadKeys(c, read...)
+				trackReadKeys(c, db.index, read...)
 			}
 			if len(write) > 0 {
-				notifyWriteKeys(db.server, write, c.ClientID())
+				notifyWriteKeys(db.server, db.index, write, c.ClientID())
 			}
 		}
 
@@ -237,10 +237,10 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 	// CLIENT TRACKING: track read keys, notify on writes
 	if c != nil && !protocol.IsErrorReply(result) {
 		if c.IsTracking() && len(write) == 0 && len(read) > 0 {
-			trackReadKeys(c, read...)
+			trackReadKeys(c, db.index, read...)
 		}
 		if len(write) > 0 {
-			notifyWriteKeys(db.server, write, c.ClientID())
+			notifyWriteKeys(db.server, db.index, write, c.ClientID())
 		}
 	}
 

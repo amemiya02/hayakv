@@ -411,6 +411,8 @@ func (server *Server) flushDB(dbIndex int) redis.Reply {
 	if dbIndex >= len(server.dbSet) || dbIndex < 0 {
 		return protocol.MakeErrReply("ERR DB index is out of range")
 	}
+	// Notify tracking clients before flushing (sends null-array invalidation).
+	invTable.untrackDB(server, dbIndex)
 	newDB := makeDB()
 	server.loadDB(dbIndex, newDB)
 	return &protocol.OkReply{}
@@ -643,6 +645,7 @@ func (server *Server) activeExpireAllDBs() {
 			sampleSize: activeExpireKeysPerLoop,
 			maxLoops:   16,
 		})
+		db.activeHashFieldExpireCycle()
 	}
 }
 
