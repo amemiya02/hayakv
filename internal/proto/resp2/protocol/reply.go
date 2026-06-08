@@ -141,7 +141,6 @@ type IntReply struct {
 	Code int64
 }
 
-
 // ToBytes marshal redis.Reply
 func (r *IntReply) ToBytes() []byte {
 	return []byte(":" + strconv.FormatInt(r.Code, 10) + CRLF)

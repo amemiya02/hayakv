@@ -42,7 +42,6 @@ func (r *NullBulkReply) ToBytes() []byte {
 	return nullBulkBytes
 }
 
-
 var nullMultiBulkBytes = []byte("*-1\r\n")
 
 // NullMultiBulkReply is a null array (RESP2 null multi-bulk).
@@ -62,7 +61,6 @@ type EmptyMultiBulkReply struct{}
 func (r *EmptyMultiBulkReply) ToBytes() []byte {
 	return emptyMultiBulkBytes
 }
-
 
 func IsEmptyMultiBulkReply(reply redis.Reply) bool {
 	return bytes.Equal(reply.ToBytes(), emptyMultiBulkBytes)
