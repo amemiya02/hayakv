@@ -965,14 +965,14 @@ func execZMPop(db *DB, args [][]byte) redis.Reply {
 
 		// Return [key, [[member, score]...]]
 		keyReply := protocol.MakeBulkReply([]byte(key))
-		elems := make([]redis.Reply, 0, len(slice)*2)
+		elems := make([]redis.Reply, 0, len(slice))
 		for _, elem := range slice {
-			elems = append(elems,
+			elems = append(elems, protocol.MakeMultiRawReply([]redis.Reply{
 				protocol.MakeBulkReply([]byte(elem.Member)),
 				protocol.MakeBulkReply([]byte(strconv.FormatFloat(elem.Score, 'f', -1, 64))),
-			)
+			}))
 		}
-		elemsReply := protocol.MakeMultiRawReply([]redis.Reply{protocol.MakeMultiRawReply(elems)})
+		elemsReply := protocol.MakeMultiRawReply(elems)
 		return protocol.MakeMultiRawReply([]redis.Reply{keyReply, elemsReply})
 	}
 
