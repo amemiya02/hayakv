@@ -120,7 +120,7 @@ func execXAdd(db *DB, args [][]byte) redis.Reply {
 			if idx >= len(args) {
 				return protocol.MakeSyntaxErrReply()
 			}
-			id, err := stream.ParseID(string(args[idx]))
+			id, _, err := stream.ParseID(string(args[idx]))
 			if err != nil {
 				return protocol.MakeErrReply(err.Error())
 			}
@@ -156,12 +156,14 @@ func execXAdd(db *DB, args [][]byte) redis.Reply {
 	autoAssign := idStr == "*"
 
 	var id stream.StreamID
+	var autoSeq bool
 	if !autoAssign {
 		var err error
-		id, err = stream.ParseID(idStr)
+		id, autoSeq, err = stream.ParseID(idStr)
 		if err != nil {
 			return protocol.MakeErrReply(err.Error())
 		}
+		autoAssign = autoSeq // ms-* also auto-assigns
 	}
 
 	// Parse field-value pairs
@@ -183,16 +185,17 @@ func execXAdd(db *DB, args [][]byte) redis.Reply {
 		if s == nil {
 			return &protocol.NullBulkReply{}
 		}
-		// Auto-assign ID
+		var assignedID stream.StreamID
+		var err error
 		if autoAssign {
-			now := uint64(time.Now().UnixMilli())
-			if now <= s.LastID().Ms {
-				id = stream.StreamID{Ms: s.LastID().Ms, Seq: s.LastID().Seq + 1}
-			} else {
-				id = stream.StreamID{Ms: now, Seq: 0}
+			msHint := id.Ms // 0 for "*", ms value for "ms-*"
+			if msHint == 0 {
+				msHint = uint64(time.Now().UnixMilli())
 			}
+			assignedID, err = s.AddAutoAssign(msHint, fields)
+		} else {
+			assignedID, err = s.Add(id, fields)
 		}
-		assignedID, err := s.Add(id, fields)
 		if err != nil {
 			return protocol.MakeErrReply(err.Error())
 		}
@@ -207,16 +210,17 @@ func execXAdd(db *DB, args [][]byte) redis.Reply {
 	}
 
 	// Auto-assign ID
+	var assignedID stream.StreamID
+	var err error
 	if autoAssign {
-		now := uint64(time.Now().UnixMilli())
-		if now <= s.LastID().Ms {
-			id = stream.StreamID{Ms: s.LastID().Ms, Seq: s.LastID().Seq + 1}
-		} else {
-			id = stream.StreamID{Ms: now, Seq: 0}
+		msHint := id.Ms // 0 for "*", ms value for "ms-*"
+		if msHint == 0 {
+			msHint = uint64(time.Now().UnixMilli())
 		}
+		assignedID, err = s.AddAutoAssign(msHint, fields)
+	} else {
+		assignedID, err = s.Add(id, fields)
 	}
-
-	assignedID, err := s.Add(id, fields)
 	if err != nil {
 		return protocol.MakeErrReply(err.Error())
 	}
@@ -256,13 +260,13 @@ func execXRange(db *DB, args [][]byte) redis.Reply {
 	endStr := string(args[2])
 
 	// Parse start
-	start, err := stream.ParseID(startStr)
+	start, _, err := stream.ParseID(startStr)
 	if err != nil {
 		return protocol.MakeErrReply(err.Error())
 	}
 
 	// Parse end
-	end, err := stream.ParseID(endStr)
+	end, _, err := stream.ParseID(endStr)
 	if err != nil {
 		return protocol.MakeErrReply(err.Error())
 	}
@@ -304,13 +308,13 @@ func execXRevRange(db *DB, args [][]byte) redis.Reply {
 	startStr := string(args[2])
 
 	// Parse start
-	start, err := stream.ParseID(startStr)
+	start, _, err := stream.ParseID(startStr)
 	if err != nil {
 		return protocol.MakeErrReply(err.Error())
 	}
 
 	// Parse end
-	end, err := stream.ParseID(endStr)
+	end, _, err := stream.ParseID(endStr)
 	if err != nil {
 		return protocol.MakeErrReply(err.Error())
 	}
@@ -392,7 +396,7 @@ func execXDel(db *DB, args [][]byte) redis.Reply {
 
 	ids := make([]stream.StreamID, 0, len(args)-1)
 	for _, arg := range args[1:] {
-		id, err := stream.ParseID(string(arg))
+		id, _, err := stream.ParseID(string(arg))
 		if err != nil {
 			return protocol.MakeErrReply(err.Error())
 		}
@@ -457,7 +461,7 @@ func execXTrim(db *DB, args [][]byte) redis.Reply {
 		if idx >= len(args) {
 			return protocol.MakeSyntaxErrReply()
 		}
-		id, err := stream.ParseID(string(args[idx]))
+		id, _, err := stream.ParseID(string(args[idx]))
 		if err != nil {
 			return protocol.MakeErrReply(err.Error())
 		}
@@ -476,7 +480,7 @@ func execXSetID(db *DB, args [][]byte) redis.Reply {
 	}
 
 	key := string(args[0])
-	lastID, err := stream.ParseID(string(args[1]))
+	lastID, _, err := stream.ParseID(string(args[1]))
 	if err != nil {
 		return protocol.MakeErrReply(err.Error())
 	}
@@ -503,7 +507,7 @@ func execXSetID(db *DB, args [][]byte) redis.Reply {
 			if idx >= len(args) {
 				return protocol.MakeSyntaxErrReply()
 			}
-			id, err := stream.ParseID(string(args[idx]))
+			id, _, err := stream.ParseID(string(args[idx]))
 			if err != nil {
 				return protocol.MakeErrReply(err.Error())
 			}
@@ -600,7 +604,7 @@ func execXRead(db *DB, args [][]byte) redis.Reply {
 			startID = s.LastID()
 		} else {
 			var err error
-			startID, err = stream.ParseID(ids[i])
+			startID, _, err = stream.ParseID(ids[i])
 			if err != nil {
 				return protocol.MakeErrReply(err.Error())
 			}
@@ -642,7 +646,7 @@ func execXRead(db *DB, args [][]byte) redis.Reply {
 	}
 
 	if len(results) == 0 {
-		return &protocol.NullBulkReply{}
+		return &protocol.NullMultiBulkReply{}
 	}
 
 	return protocol.MakeMultiRawReply(results)

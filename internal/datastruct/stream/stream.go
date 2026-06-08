@@ -28,27 +28,31 @@ func (id StreamID) String() string {
 	return fmt.Sprintf("%d-%d", id.Ms, id.Seq)
 }
 
-// ParseID parses "ms-seq" or "ms" format
-func ParseID(s string) (StreamID, error) {
+// ParseID parses "ms-seq", "ms", or "ms-*" format.
+// Returns (id, autoSeq, error) where autoSeq is true when seq is "*".
+func ParseID(s string) (StreamID, bool, error) {
 	if s == "+" {
-		return StreamID{maxMs, maxSeq}, nil
+		return StreamID{maxMs, maxSeq}, false, nil
 	}
 	if s == "-" {
-		return StreamID{0, 0}, nil
+		return StreamID{0, 0}, false, nil
 	}
 	parts := strings.SplitN(s, "-", 2)
 	ms, err := strconv.ParseUint(parts[0], 10, 64)
 	if err != nil {
-		return StreamID{}, errors.New("ERR Invalid stream ID specified as stream command argument")
+		return StreamID{}, false, errors.New("ERR Invalid stream ID specified as stream command argument")
 	}
 	if len(parts) == 1 {
-		return StreamID{Ms: ms, Seq: 0}, nil
+		return StreamID{Ms: ms, Seq: 0}, false, nil
+	}
+	if parts[1] == "*" {
+		return StreamID{Ms: ms}, true, nil
 	}
 	seq, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
-		return StreamID{}, errors.New("ERR Invalid stream ID specified as stream command argument")
+		return StreamID{}, false, errors.New("ERR Invalid stream ID specified as stream command argument")
 	}
-	return StreamID{Ms: ms, Seq: seq}, nil
+	return StreamID{Ms: ms, Seq: seq}, false, nil
 }
 
 // Entry represents a single stream entry
@@ -75,16 +79,11 @@ func New() *Stream {
 	}
 }
 
-// Add appends an entry. If id has zero Ms/Seq, auto-assigns.
-// Enforces monotonic IDs. Returns the assigned ID.
+// Add appends an entry with an explicit ID.
+// Enforces monotonic IDs. Rejects {0,0}. Returns the assigned ID.
 func (s *Stream) Add(id StreamID, fields [][2]string) (StreamID, error) {
 	if id.Ms == 0 && id.Seq == 0 {
-		// Auto-assign: use current time ms, seq = 0 or last+1
-		id.Ms = s.lastID.Ms
-		if id.Ms <= s.lastID.Ms {
-			id.Ms = s.lastID.Ms
-			id.Seq = s.lastID.Seq + 1
-		}
+		return StreamID{}, errors.New("ERR The ID specified in XADD must be greater than 0-0")
 	}
 
 	// Enforce monotonic: new ID must be > lastID
@@ -103,6 +102,18 @@ func (s *Stream) Add(id StreamID, fields [][2]string) (StreamID, error) {
 	}
 
 	return id, nil
+}
+
+// AddAutoAssign appends an entry with an auto-assigned ID.
+// If msMs is 0, uses current time. The sequence is auto-assigned.
+func (s *Stream) AddAutoAssign(msHint uint64, fields [][2]string) (StreamID, error) {
+	var id StreamID
+	if msHint <= s.lastID.Ms {
+		id = StreamID{Ms: s.lastID.Ms, Seq: s.lastID.Seq + 1}
+	} else {
+		id = StreamID{Ms: msHint, Seq: 0}
+	}
+	return s.Add(id, fields)
 }
 
 // Len returns the number of entries

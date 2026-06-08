@@ -20,7 +20,7 @@ func parseStreamStartID(s *stream.Stream, arg string) (stream.StreamID, protocol
 	if arg == "0" {
 		return stream.StreamID{Ms: 0, Seq: 0}, nil
 	}
-	id, err := stream.ParseID(arg)
+	id, _, err := stream.ParseID(arg)
 	if err != nil {
 		return stream.StreamID{}, protocol.MakeErrReply("ERR Invalid stream ID specified as stream command argument")
 	}
@@ -390,7 +390,7 @@ parseStreams:
 			entries = g.ReadNew(s, consumerName, count)
 		} else {
 			// Read from PEL
-			startID, err := stream.ParseID(ids[j])
+			startID, _, err := stream.ParseID(ids[j])
 			if err != nil {
 				return protocol.MakeErrReply("ERR Invalid stream ID specified as stream command argument")
 			}
@@ -453,7 +453,7 @@ func execXAck(db *DB, args [][]byte) redis.Reply {
 
 	ids := make([]stream.StreamID, 0, len(args)-2)
 	for _, arg := range args[2:] {
-		id, err := stream.ParseID(string(arg))
+		id, _, err := stream.ParseID(string(arg))
 		if err != nil {
 			return protocol.MakeErrReply("ERR Invalid stream ID specified as stream command argument")
 		}
@@ -521,11 +521,11 @@ func execXPending(db *DB, args [][]byte) redis.Reply {
 		consumerName = string(args[5])
 	}
 
-	startID, err := stream.ParseID(startArg)
+	startID, _, err := stream.ParseID(startArg)
 	if err != nil {
 		return protocol.MakeErrReply("ERR Invalid stream ID specified as stream command argument")
 	}
-	endID, err := stream.ParseID(endArg)
+	endID, _, err := stream.ParseID(endArg)
 	if err != nil {
 		return protocol.MakeErrReply("ERR Invalid stream ID specified as stream command argument")
 	}
@@ -642,7 +642,7 @@ func execXClaim(db *DB, args [][]byte) redis.Reply {
 		if arg == "IDLE" || arg == "TIME" || arg == "RETRYCOUNT" || arg == "FORCE" || arg == "JUSTID" {
 			break
 		}
-		id, err := stream.ParseID(string(args[i]))
+		id, _, err := stream.ParseID(string(args[i]))
 		if err != nil {
 			return protocol.MakeErrReply("ERR Invalid stream ID specified as stream command argument")
 		}
@@ -803,7 +803,7 @@ func execXAutoClaim(db *DB, args [][]byte) redis.Reply {
 		}
 	}
 
-	startID, err := stream.ParseID(startArg)
+	startID, _, err := stream.ParseID(startArg)
 	if err != nil {
 		return protocol.MakeErrReply("ERR Invalid stream ID specified as stream command argument")
 	}

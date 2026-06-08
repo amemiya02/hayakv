@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"sort"
 	"time"
 )
 
@@ -80,7 +81,7 @@ func (g *Group) ReadNew(s *Stream, consumerName string, count int) []Entry {
 	return entries
 }
 
-// ReadPending delivers pending entries for the given consumer.
+// ReadPending delivers pending entries for the given consumer, sorted by ID.
 func (g *Group) ReadPending(consumerName string, start, end StreamID, count int) []Entry {
 	consumer, ok := g.consumers[consumerName]
 	if !ok {
@@ -99,9 +100,13 @@ func (g *Group) ReadPending(consumerName string, start, end StreamID, count int)
 			continue
 		}
 		result = append(result, Entry{ID: id})
-		if count > 0 && len(result) >= count {
-			break
-		}
+	}
+	// Sort by ID for deterministic output (map iteration is unordered).
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ID.Greater(result[j].ID)
+	})
+	if count > 0 && len(result) > count {
+		result = result[:count]
 	}
 	return result
 }
