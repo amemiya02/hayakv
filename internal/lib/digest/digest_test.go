@@ -6,8 +6,8 @@ import (
 
 func TestValueDigestLength(t *testing.T) {
 	d := ValueDigest([]byte("hello"))
-	if len(d) != 32 {
-		t.Fatalf("expected 32-char hex digest, got %d chars: %q", len(d), d)
+	if len(d) != 16 {
+		t.Fatalf("expected 16-char hex digest, got %d chars: %q", len(d), d)
 	}
 }
 

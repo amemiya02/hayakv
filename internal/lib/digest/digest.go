@@ -1,21 +1,18 @@
 // Package digest provides value digests for conditional commands (IFDEQ/IFDNE).
-// Uses XXH3-128 (zeebo/xxh3) to match Redis 8.4's digest algorithm.
+// Uses XXH3-64 (zeebo/xxh3) producing 16 hex chars, matching Redis 8.4.
 package digest
 
 import (
-	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 
 	"github.com/zeebo/xxh3"
 )
 
-// ValueDigest returns the lowercase 32-char hex XXH3-128 digest of b.
+// ValueDigest returns the lowercase 16-char hex XXH3-64 digest of b.
 func ValueDigest(b []byte) string {
-	h := xxh3.Hash128(b)
-	var buf [16]byte
-	binary.BigEndian.PutUint64(buf[0:8], h.Hi)
-	binary.BigEndian.PutUint64(buf[8:16], h.Lo)
-	return hex.EncodeToString(buf[:])
+	h := xxh3.Hash(b)
+	return fmt.Sprintf("%016x", h)
 }
 
 // FromHex decodes a hex digest string. Returns nil if invalid.
