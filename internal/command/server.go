@@ -224,6 +224,17 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 	if cmdName == "config" {
 		return execConfig(cmdLine[1:])
 	}
+	if cmdName == "client" {
+		return execClient(server, c, cmdLine[1:])
+	}
+	// monitor
+	if cmdName == "monitor" {
+		return execMonitor(server, c)
+	}
+	// reset
+	if cmdName == "reset" {
+		return execReset(server, c)
+	}
 
 	// read only slave
 	role := atomic.LoadInt32(&server.role)
@@ -310,12 +321,17 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 	exec := selectedDB.Exec(c, cmdLine)
 	// Record slow query logs
 	server.slogLogger.Record(GodisExecCommandStartUnixTime, cmdLine, c.Name())
+	// Feed monitors
+	if c != nil {
+		feedMonitors(dbIndex, cmdLine, c.Name())
+	}
 	return exec
 }
 
 // AfterClientClose does some clean after client close connection
 func (server *Server) AfterClientClose(c redis.Connection) {
 	pubsub.UnsubscribeAll(server.hub, c)
+	unregisterMonitor(c.ClientID())
 }
 
 // Close graceful shutdown database

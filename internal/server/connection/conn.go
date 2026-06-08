@@ -127,6 +127,9 @@ func (c *Connection) OnClose(fn func(*Connection)) {
 
 // RemoteAddr returns the remote network address
 func (c *Connection) RemoteAddr() string {
+	if c.conn == nil {
+		return ""
+	}
 	return c.conn.RemoteAddr().String()
 }
 

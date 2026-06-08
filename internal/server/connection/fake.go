@@ -24,6 +24,7 @@ func NewFakeConn() *FakeConn {
 	c := &FakeConn{}
 	c.id = atomic.AddUint64(&nextClientID, 1)
 	c.createdAt = time.Now()
+	RegisterClient(&c.Connection)
 	return c
 }
 
@@ -96,6 +97,7 @@ func (c *FakeConn) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.closed = true
+	UnregisterClient(c.id)
 	c.notifyLocked()
 	return nil
 }
