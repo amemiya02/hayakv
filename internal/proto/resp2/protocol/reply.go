@@ -141,12 +141,6 @@ type IntReply struct {
 	Code int64
 }
 
-// MakeIntReply creates int protocol
-func MakeIntReply(code int64) *IntReply {
-	return &IntReply{
-		Code: code,
-	}
-}
 
 // ToBytes marshal redis.Reply
 func (r *IntReply) ToBytes() []byte {

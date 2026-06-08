@@ -42,10 +42,6 @@ func (r *NullBulkReply) ToBytes() []byte {
 	return nullBulkBytes
 }
 
-// MakeNullBulkReply creates a new NullBulkReply
-func MakeNullBulkReply() *NullBulkReply {
-	return &NullBulkReply{}
-}
 
 var nullMultiBulkBytes = []byte("*-1\r\n")
 
@@ -67,10 +63,6 @@ func (r *EmptyMultiBulkReply) ToBytes() []byte {
 	return emptyMultiBulkBytes
 }
 
-// MakeEmptyMultiBulkReply creates EmptyMultiBulkReply
-func MakeEmptyMultiBulkReply() *EmptyMultiBulkReply {
-	return &EmptyMultiBulkReply{}
-}
 
 func IsEmptyMultiBulkReply(reply redis.Reply) bool {
 	return bytes.Equal(reply.ToBytes(), emptyMultiBulkBytes)
