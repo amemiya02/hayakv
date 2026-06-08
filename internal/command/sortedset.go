@@ -882,7 +882,108 @@ func execZScan(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeMultiRawReply(result)
 }
 
+// prepareZMPop returns the keys for ZMPOP numkeys key [key ...] MIN|MAX [COUNT count]
+func prepareZMPop(args [][]byte) ([]string, []string) {
+	numKeys64, err := strconv.ParseInt(string(args[0]), 10, 64)
+	if err != nil || numKeys64 < 1 {
+		return nil, nil
+	}
+	numKeys := int(numKeys64)
+	keys := make([]string, numKeys)
+	for i := 0; i < numKeys; i++ {
+		keys[i] = string(args[1+i])
+	}
+	return keys, nil
+}
+
+// execZMPop pops members from the first non-empty sorted set.
+// ZMPOP numkeys key [key ...] MIN|MAX [COUNT count]
+func execZMPop(db *DB, args [][]byte) redis.Reply {
+	if len(args) < 3 {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'zmpop' command")
+	}
+	numKeys64, err := strconv.ParseInt(string(args[0]), 10, 64)
+	if err != nil || numKeys64 < 1 {
+		return protocol.MakeErrReply("ERR value is not an integer or out of range")
+	}
+	numKeys := int(numKeys64)
+	if len(args) < 1+numKeys+1 {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'zmpop' command")
+	}
+
+	direction := strings.ToUpper(string(args[1+numKeys]))
+	if direction != "MIN" && direction != "MAX" {
+		return protocol.MakeErrReply("ERR syntax error")
+	}
+
+	count := 1
+	argOffset := 2 + numKeys
+	if argOffset < len(args) {
+		opt := strings.ToUpper(string(args[argOffset]))
+		if opt == "COUNT" {
+			if argOffset+1 >= len(args) {
+				return protocol.MakeErrReply("ERR syntax error")
+			}
+			c, err := strconv.ParseInt(string(args[argOffset+1]), 10, 64)
+			if err != nil || c < 1 {
+				return protocol.MakeErrReply("ERR value is not an integer or out of range")
+			}
+			count = int(c)
+		} else {
+			return protocol.MakeErrReply("ERR syntax error")
+		}
+	}
+
+	for i := 0; i < numKeys; i++ {
+		key := string(args[1+i])
+		zset, errReply := db.getAsZSet(key)
+		if errReply != nil {
+			return errReply
+		}
+		if zset == nil || zset.Len() == 0 {
+			continue
+		}
+
+		// Found a non-empty sorted set
+		if count > zset.Len() {
+			count = zset.Len()
+		}
+
+		desc := direction == "MAX"
+		slice := zset.RangeByRank(0, int64(count), desc)
+
+		// Remove the popped members
+		for _, elem := range slice {
+			zset.Remove(elem.Member)
+		}
+		syncZSetEncodingAfterWrite(db, key, zset)
+
+		if zset.Len() == 0 {
+			db.Remove(key)
+		}
+		db.addAof(utils.ToCmdLine3("zmpop", args...))
+
+		// Return [key, [[member, score]...]]
+		keyReply := protocol.MakeBulkReply([]byte(key))
+		elems := make([]redis.Reply, 0, len(slice)*2)
+		for _, elem := range slice {
+			elems = append(elems,
+				protocol.MakeBulkReply([]byte(elem.Member)),
+				protocol.MakeBulkReply([]byte(strconv.FormatFloat(elem.Score, 'f', -1, 64))),
+			)
+		}
+		elemsReply := protocol.MakeMultiRawReply([]redis.Reply{protocol.MakeMultiRawReply(elems)})
+		return protocol.MakeMultiRawReply([]redis.Reply{keyReply, elemsReply})
+	}
+
+	// All sorted sets empty
+	return &protocol.NullBulkReply{}
+}
+
 func init() {
+	registerCommand("ZMPop", execZMPop, prepareZMPop, nil, -4, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite}, 1, -2, 1).
+		attachNotify(notifyZset, "zmpop")
 	registerCommand("ZAdd", execZAdd, writeFirstKey, undoZAdd, -4, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
 		attachNotify(notifyZset, "zadd")

@@ -771,7 +771,259 @@ func execLInsert(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeIntReply(int64(list.Len()))
 }
 
+// execLPos returns the index of matching elements in a list.
+// LPOS key element [RANK rank] [COUNT count] [MAXLEN maxlen]
+func execLPos(db *DB, args [][]byte) redis.Reply {
+	if len(args) < 2 {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'lpos' command")
+	}
+	key := string(args[0])
+	element := args[1]
+
+	var rank int64 = 1
+	var count int64 = -1  // -1 means return single index (not array)
+	var maxlen int64 = -1 // -1 means no limit
+
+	for i := 2; i < len(args); i++ {
+		opt := strings.ToUpper(string(args[i]))
+		switch opt {
+		case "RANK":
+			if i+1 >= len(args) {
+				return protocol.MakeErrReply("ERR syntax error")
+			}
+			v, err := strconv.ParseInt(string(args[i+1]), 10, 64)
+			if err != nil {
+				return protocol.MakeErrReply("ERR value is not an integer or out of range")
+			}
+			if v == 0 {
+				return protocol.MakeErrReply("ERR RANK can't be zero: use 1 to start from the first match, 2 from the second ... or use negative to start from the end of the list")
+			}
+			rank = v
+			i++
+		case "COUNT":
+			if i+1 >= len(args) {
+				return protocol.MakeErrReply("ERR syntax error")
+			}
+			v, err := strconv.ParseInt(string(args[i+1]), 10, 64)
+			if err != nil {
+				return protocol.MakeErrReply("ERR value is not an integer or out of range")
+			}
+			if v < 0 {
+				return protocol.MakeErrReply("ERR value is not an integer or out of range")
+			}
+			count = v
+			i++
+		case "MAXLEN":
+			if i+1 >= len(args) {
+				return protocol.MakeErrReply("ERR syntax error")
+			}
+			v, err := strconv.ParseInt(string(args[i+1]), 10, 64)
+			if err != nil {
+				return protocol.MakeErrReply("ERR value is not an integer or out of range")
+			}
+			if v < 0 {
+				return protocol.MakeErrReply("ERR value is not an integer or out of range")
+			}
+			maxlen = v
+			i++
+		default:
+			return protocol.MakeErrReply("ERR syntax error")
+		}
+	}
+
+	list, errReply := db.getAsList(key)
+	if errReply != nil {
+		return errReply
+	}
+	if list == nil {
+		if count >= 0 {
+			return &protocol.EmptyMultiBulkReply{}
+		}
+		return &protocol.NullBulkReply{}
+	}
+
+	size := list.Len()
+	limit := size
+	if maxlen >= 0 && int(maxlen) < limit {
+		limit = int(maxlen)
+	}
+
+	// Collect matching indices
+	var matches []int64
+	if rank > 0 {
+		// Search from left to right
+		matchCount := int64(0)
+		list.ForEach(func(i int, v interface{}) bool {
+			if i >= limit {
+				return false
+			}
+			if utils.Equals(v, element) {
+				matchCount++
+				if matchCount >= rank {
+					if count < 0 {
+						// Single result mode
+						matches = append(matches, int64(i))
+						return false
+					}
+					matches = append(matches, int64(i))
+					if count > 0 && int64(len(matches)) >= count {
+						return false
+					}
+				}
+			}
+			return true
+		})
+	} else {
+		// rank < 0: search from right to left
+		absRank := -rank
+		// Collect all matching indices first (up to limit)
+		var allMatches []int
+		list.ForEach(func(i int, v interface{}) bool {
+			if i >= limit {
+				return false
+			}
+			if utils.Equals(v, element) {
+				allMatches = append(allMatches, i)
+			}
+			return true
+		})
+		// Take from the end
+		start := int64(len(allMatches)) - absRank
+		if start < 0 {
+			// Not enough matches
+			if count >= 0 {
+				return &protocol.EmptyMultiBulkReply{}
+			}
+			return &protocol.NullBulkReply{}
+		}
+		if count < 0 {
+			matches = append(matches, int64(allMatches[start]))
+		} else {
+			end := start + count
+			if end > int64(len(allMatches)) {
+				end = int64(len(allMatches))
+			}
+			for j := start; j < end; j++ {
+				matches = append(matches, int64(allMatches[j]))
+			}
+		}
+	}
+
+	if count >= 0 {
+		// Return array of indices
+		if len(matches) == 0 {
+			return &protocol.EmptyMultiBulkReply{}
+		}
+		result := make([]redis.Reply, len(matches))
+		for i, idx := range matches {
+			result[i] = protocol.MakeIntReply(idx)
+		}
+		return protocol.MakeMultiRawReply(result)
+	}
+	// Single result mode
+	if len(matches) == 0 {
+		return &protocol.NullBulkReply{}
+	}
+	return protocol.MakeIntReply(matches[0])
+}
+
+// prepareLMPop returns the keys for LMPOP (numkeys key [key ...] LEFT|RIGHT [COUNT count])
+func prepareLMPop(args [][]byte) ([]string, []string) {
+	numKeys64, err := strconv.ParseInt(string(args[0]), 10, 64)
+	if err != nil || numKeys64 < 1 {
+		return nil, nil
+	}
+	numKeys := int(numKeys64)
+	keys := make([]string, numKeys)
+	for i := 0; i < numKeys; i++ {
+		keys[i] = string(args[1+i])
+	}
+	return keys, nil
+}
+
+// execLMPop pops elements from the first non-empty list.
+// LMPOP numkeys key [key ...] LEFT|RIGHT [COUNT count]
+func execLMPop(db *DB, args [][]byte) redis.Reply {
+	if len(args) < 3 {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'lmpop' command")
+	}
+	numKeys64, err := strconv.ParseInt(string(args[0]), 10, 64)
+	if err != nil || numKeys64 < 1 {
+		return protocol.MakeErrReply("ERR value is not an integer or out of range")
+	}
+	numKeys := int(numKeys64)
+	if len(args) < 1+numKeys+1 {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'lmpop' command")
+	}
+
+	direction := strings.ToUpper(string(args[1+numKeys]))
+	if direction != "LEFT" && direction != "RIGHT" {
+		return protocol.MakeErrReply("ERR syntax error")
+	}
+
+	count := 1
+	argOffset := 2 + numKeys
+	if argOffset < len(args) {
+		opt := strings.ToUpper(string(args[argOffset]))
+		if opt == "COUNT" {
+			if argOffset+1 >= len(args) {
+				return protocol.MakeErrReply("ERR syntax error")
+			}
+			c, err := strconv.ParseInt(string(args[argOffset+1]), 10, 64)
+			if err != nil || c < 1 {
+				return protocol.MakeErrReply("ERR value is not an integer or out of range")
+			}
+			count = int(c)
+		} else {
+			return protocol.MakeErrReply("ERR syntax error")
+		}
+	}
+
+	for i := 0; i < numKeys; i++ {
+		key := string(args[1+i])
+		list, errReply := db.getAsList(key)
+		if errReply != nil {
+			return errReply
+		}
+		if list == nil || list.Len() == 0 {
+			continue
+		}
+
+		// Found a non-empty list
+		if count > list.Len() {
+			count = list.Len()
+		}
+		vals := make([][]byte, count)
+		for j := 0; j < count; j++ {
+			var raw interface{}
+			if direction == "LEFT" {
+				raw = list.Remove(0)
+			} else {
+				raw = list.RemoveLast()
+			}
+			vals[j] = raw.([]byte)
+		}
+		if list.Len() == 0 {
+			db.Remove(key)
+		}
+		db.addAof(utils.ToCmdLine3("lmpop", args...))
+
+		// Return [key, [elements]]
+		keyReply := protocol.MakeBulkReply([]byte(key))
+		elemsReply := protocol.MakeMultiBulkReply(vals)
+		return protocol.MakeMultiRawReply([]redis.Reply{keyReply, elemsReply})
+	}
+
+	// All lists empty
+	return &protocol.NullBulkReply{}
+}
+
 func init() {
+	registerCommand("LPos", execLPos, readFirstKey, nil, -3, flagReadOnly).
+		attachCommandExtra([]string{redisFlagReadonly}, 1, 1, 1)
+	registerCommand("LMPop", execLMPop, prepareLMPop, nil, -4, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite}, 1, -2, 1).
+		attachNotify(notifyList, "lmpop")
 	registerCommand("LPush", execLPush, writeFirstKey, undoLPush, -3, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
 		attachNotify(notifyList, "lpush")

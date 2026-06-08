@@ -24,6 +24,8 @@ func execObject(db *DB, args [][]byte) redis.Reply {
 		return execObjectIdleTime(db, key)
 	case "FREQ":
 		return execObjectFreq(db, key)
+	case "REFCOUNT":
+		return execObjectRefCount(db, key)
 	default:
 		return protocol.MakeErrReply("ERR Unknown subcommand or wrong number of arguments for '" + subCommand + "'")
 	}
@@ -108,6 +110,15 @@ func execObjectFreq(db *DB, key string) redis.Reply {
 		return protocol.MakeIntReply(int64(lfuInitVal))
 	}
 	return protocol.MakeIntReply(int64(lfuDecay(raw.(lruMeta))))
+}
+
+// execObjectRefCount returns the reference count of the object at key.
+// In Go (GC-managed) this always returns 1, matching single-owner semantics.
+func execObjectRefCount(db *DB, key string) redis.Reply {
+	if _, exists := db.getEntityNoTouch(key); !exists {
+		return protocol.MakeErrReply("ERR no such key")
+	}
+	return protocol.MakeIntReply(1)
 }
 
 func init() {

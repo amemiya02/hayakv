@@ -471,7 +471,112 @@ func execSScan(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeMultiRawReply(result)
 }
 
+// execSMIsMember checks membership for multiple members.
+// SMISMEMBER key member [member ...]
+func execSMIsMember(db *DB, args [][]byte) redis.Reply {
+	if len(args) < 2 {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'smismember' command")
+	}
+	key := string(args[0])
+	members := args[1:]
+
+	set, errReply := db.getAsSet(key)
+	if errReply != nil {
+		return errReply
+	}
+
+	result := make([]redis.Reply, len(members))
+	if set == nil {
+		for i := range members {
+			result[i] = protocol.MakeIntReply(0)
+		}
+	} else {
+		for i, member := range members {
+			if set.Has(string(member)) {
+				result[i] = protocol.MakeIntReply(1)
+			} else {
+				result[i] = protocol.MakeIntReply(0)
+			}
+		}
+	}
+	return protocol.MakeMultiRawReply(result)
+}
+
+// prepareSInterCard returns the keys for SINTERCARD numkeys key [key ...] [LIMIT limit]
+func prepareSInterCard(args [][]byte) ([]string, []string) {
+	numKeys64, err := strconv.ParseInt(string(args[0]), 10, 64)
+	if err != nil || numKeys64 < 1 {
+		return nil, nil
+	}
+	numKeys := int(numKeys64)
+	keys := make([]string, numKeys)
+	for i := 0; i < numKeys; i++ {
+		keys[i] = string(args[1+i])
+	}
+	return nil, keys
+}
+
+// execSInterCard returns the cardinality of the intersection of given sets.
+// SINTERCARD numkeys key [key ...] [LIMIT limit]
+func execSInterCard(db *DB, args [][]byte) redis.Reply {
+	if len(args) < 1 {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'sintercard' command")
+	}
+	numKeys64, err := strconv.ParseInt(string(args[0]), 10, 64)
+	if err != nil || numKeys64 < 1 {
+		return protocol.MakeErrReply("ERR value is not an integer or out of range")
+	}
+	numKeys := int(numKeys64)
+	if len(args) < 1+numKeys {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'sintercard' command")
+	}
+
+	var limit int64 = 0 // 0 means no limit
+	argOffset := 1 + numKeys
+	if argOffset < len(args) {
+		opt := strings.ToUpper(string(args[argOffset]))
+		if opt == "LIMIT" {
+			if argOffset+1 >= len(args) {
+				return protocol.MakeErrReply("ERR syntax error")
+			}
+			l, err := strconv.ParseInt(string(args[argOffset+1]), 10, 64)
+			if err != nil || l < 0 {
+				return protocol.MakeErrReply("ERR value is not an integer or out of range")
+			}
+			limit = l
+		} else {
+			return protocol.MakeErrReply("ERR syntax error")
+		}
+	}
+
+	// Load sets; if any is empty, intersection is empty
+	sets := make([]*object.Set, 0, numKeys)
+	for i := 0; i < numKeys; i++ {
+		key := string(args[1+i])
+		set, errReply := db.getAsSet(key)
+		if errReply != nil {
+			return errReply
+		}
+		if set == nil || set.Len() == 0 {
+			return protocol.MakeIntReply(0)
+		}
+		sets = append(sets, set)
+	}
+
+	// Count intersection with early exit if limit is set
+	result := objectIntersect(sets...)
+	count := int64(result.Len())
+	if limit > 0 && count > limit {
+		count = limit
+	}
+	return protocol.MakeIntReply(count)
+}
+
 func init() {
+	registerCommand("SMIsMember", execSMIsMember, readFirstKey, nil, -3, flagReadOnly).
+		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
+	registerCommand("SInterCard", execSInterCard, prepareSInterCard, nil, -4, flagReadOnly).
+		attachCommandExtra([]string{redisFlagReadonly}, 1, -2, 1)
 	registerCommand("SAdd", execSAdd, writeFirstKey, undoSetChange, -3, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
 		attachNotify(notifySet, "sadd")
