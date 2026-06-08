@@ -18,7 +18,7 @@ func init() {
 }
 
 // execACL dispatches ACL subcommands.
-func execACL(db *DB, args [][]byte) redis.Reply {
+func execACL(db *DB, c redis.Connection, args [][]byte) redis.Reply {
 	if len(args) < 1 {
 		return protocol.MakeErrReply("ERR wrong number of arguments for 'acl' command")
 	}
@@ -31,7 +31,7 @@ func execACL(db *DB, args [][]byte) redis.Reply {
 	case "deluser":
 		return execACLDelUser(db, args[1:])
 	case "whoami":
-		return execACLWhoami(db, args[1:])
+		return execACLWhoami(db, c, args[1:])
 	case "users":
 		return execACLUsers(db)
 	case "list":
@@ -81,12 +81,48 @@ func execACLGetUser(db *DB, args [][]byte) redis.Reply {
 	if !ok {
 		return protocol.MakeNullBulkReply()
 	}
+	// Redis 8 returns a structured map (flags, passwords, commands, keys, channels)
+	var pairs []redis.Reply
+	// flags
+	flags := []redis.Reply{}
+	if u.Enabled {
+		flags = append(flags, protocol.MakeBulkReply([]byte("on")))
+	} else {
+		flags = append(flags, protocol.MakeBulkReply([]byte("off")))
+	}
+	if u.NoPass {
+		flags = append(flags, protocol.MakeBulkReply([]byte("nopass")))
+	}
+	if u.AllKeys {
+		flags = append(flags, protocol.MakeBulkReply([]byte("allkeys")))
+	}
+	if u.AllChans {
+		flags = append(flags, protocol.MakeBulkReply([]byte("allchannels")))
+	}
+	if u.AllCmds {
+		flags = append(flags, protocol.MakeBulkReply([]byte("allcommands")))
+	}
+	pairs = append(pairs,
+		protocol.MakeBulkReply([]byte("flags")),
+		protocol.MakeMultiRawReply(flags))
+	// passwords
+	passwords := make([]redis.Reply, 0, len(u.PassHashes))
+	for h := range u.PassHashes {
+		passwords = append(passwords, protocol.MakeBulkReply([]byte(h)))
+	}
+	pairs = append(pairs,
+		protocol.MakeBulkReply([]byte("passwords")),
+		protocol.MakeMultiRawReply(passwords))
+	// commands
 	rules := u.DescribeRules()
 	elems := make([]redis.Reply, len(rules))
 	for i, r := range rules {
 		elems[i] = protocol.MakeBulkReply([]byte(r))
 	}
-	return protocol.MakeMultiRawReply(elems)
+	pairs = append(pairs,
+		protocol.MakeBulkReply([]byte("commands")),
+		protocol.MakeMultiRawReply(elems))
+	return protocol.MakeMultiRawReply(pairs)
 }
 
 // execACLDelUser removes one or more users.
@@ -105,12 +141,18 @@ func execACLDelUser(db *DB, args [][]byte) redis.Reply {
 }
 
 // execACLWhoami returns the authenticated user name.
-func execACLWhoami(db *DB, args [][]byte) redis.Reply {
+func execACLWhoami(db *DB, c redis.Connection, args [][]byte) redis.Reply {
 	if len(args) != 0 {
 		return protocol.MakeErrReply("ERR wrong number of arguments for 'acl|whoami' command")
 	}
-	// TODO: return the connection's actual authenticated user once per-conn
-	// user tracking is wired. For now return "default".
+	// Return the connection's actual authenticated user name.
+	if c != nil {
+		if u := c.User(); u != nil {
+			if user, ok := u.(*acl.User); ok {
+				return protocol.MakeBulkReply([]byte(user.Name))
+			}
+		}
+	}
 	return protocol.MakeBulkReply([]byte("default"))
 }
 

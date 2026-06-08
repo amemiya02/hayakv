@@ -84,12 +84,21 @@ func Info(db *Server, args [][]byte) redis.Reply {
 // Auth validate client's password
 func Auth(c redis.Connection, args [][]byte) redis.Reply {
 	if len(args) == 1 {
-		// Legacy 1-arg AUTH
-		if config.Properties.RequirePass == "" {
+		// Legacy 1-arg AUTH: authenticate as "default" user
+		if config.Properties.RequirePass == "" && globalACL == nil {
 			return protocol.MakeErrReply("ERR Client sent AUTH, but no password is set")
 		}
 		passwd := string(args[0])
 		c.SetPassword(passwd)
+		if globalACL != nil {
+			u, err := globalACL.Authenticate("default", passwd)
+			if err != nil {
+				return protocol.MakeErrReply(err.Error())
+			}
+			c.SetUser(u)
+			return &protocol.OkReply{}
+		}
+		// Fallback to legacy single-password check
 		if config.Properties.RequirePass != passwd {
 			return protocol.MakeErrReply("ERR invalid password")
 		}
@@ -99,10 +108,17 @@ func Auth(c redis.Connection, args [][]byte) redis.Reply {
 		// 2-arg AUTH: username password
 		username := string(args[0])
 		password := string(args[1])
-		// Wire to ACL registry (will be done in Task 4)
-		// For now, fall back to legacy behavior
+		c.SetPassword(password)
+		if globalACL != nil {
+			u, err := globalACL.Authenticate(username, password)
+			if err != nil {
+				return protocol.MakeErrReply(err.Error())
+			}
+			c.SetUser(u)
+			return &protocol.OkReply{}
+		}
+		// Fallback: only "default" with RequirePass
 		if username == "default" && config.Properties.RequirePass != "" {
-			c.SetPassword(password)
 			if config.Properties.RequirePass != password {
 				return protocol.MakeErrReply("WRONGPASS invalid username-password pair or user is disabled.")
 			}

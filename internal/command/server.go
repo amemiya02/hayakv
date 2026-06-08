@@ -80,6 +80,10 @@ type Server struct {
 	acl *acl.ACL
 }
 
+// globalACL is a package-level reference so Auth() can access the ACL registry
+// without changing its signature. Set during NewStandaloneServer.
+var globalACL *acl.ACL
+
 // DisableCron prevents StartCron from launching a background goroutine.
 // Called when the eventloop net backend is active (single-threaded command execution).
 func (server *Server) DisableCron() { server.disableCron = true }
@@ -165,6 +169,7 @@ func NewStandaloneServer() *Server {
 
 	// initialize ACL
 	server.acl = acl.NewACL()
+	globalACL = server.acl
 
 	return server
 }
@@ -205,12 +210,20 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 		if errReply != nil {
 			return errReply
 		}
-		return execACL(selectedDB, cmdLine[1:])
+		return execACL(selectedDB, c, cmdLine[1:])
 	}
 
 	// ACL enforcement (fast path: default user with all perms skips check)
 	if server.acl != nil {
-		user := server.acl.DefaultUser() // Will be replaced with per-connection user in Task 4
+		var user *acl.User
+		if c != nil {
+			if u := c.User(); u != nil {
+				user, _ = u.(*acl.User)
+			}
+		}
+		if user == nil {
+			user = server.acl.DefaultUser()
+		}
 		if user != nil && !user.IsDefaultAllPerms() {
 			if !user.CanRunCommand(cmdName) {
 				return protocol.MakeErrReply("NOPERM User " + user.Name + " has no permissions to run the '" + cmdName + "' command")
