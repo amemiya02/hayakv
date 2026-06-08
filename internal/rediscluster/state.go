@@ -45,7 +45,7 @@ func newClusterState(ip string, port int, confPath string) *clusterState {
 		nodes:          map[string]*clusterNode{self.id: self},
 		migrations:     map[uint16]*migration{},
 		epoch:          startEpoch,
-		failureReports: newFailureReports(2), // default quorum; updated when cluster size is known
+		failureReports: newFailureReports(),
 		confPath:       confPath,
 	}
 }

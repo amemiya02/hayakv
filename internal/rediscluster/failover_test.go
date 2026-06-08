@@ -145,16 +145,46 @@ func TestRecordVote(t *testing.T) {
 		active:        true,
 		votesReceived: map[string]bool{s.self.id: true},
 		votesNeeded:   2,
+		reqEpoch:      10,
 	}
 	s.mu.Unlock()
 
-	won := s.recordVote("voter1")
+	// Vote with matching epoch → should count
+	won := s.recordVote("voter1", 10)
 	if !won {
 		t.Fatal("election should be won with 2 votes when 2 needed")
 	}
 
-	won2 := s.recordVote("voter1")
+	// Duplicate vote → ignored
+	won2 := s.recordVote("voter1", 10)
 	if won2 {
 		t.Fatal("duplicate vote should not re-trigger win")
+	}
+}
+
+func TestRecordVoteRejectsStaleEpoch(t *testing.T) {
+	s := newClusterState("127.0.0.1", 7000, t.TempDir()+"/nodes.conf")
+
+	s.mu.Lock()
+	s.self.flags &^= flagMaster
+	s.self.flags |= flagSlave
+	s.failoverState = &failoverState{
+		active:        true,
+		votesReceived: map[string]bool{s.self.id: true},
+		votesNeeded:   2,
+		reqEpoch:      10,
+	}
+	s.mu.Unlock()
+
+	// Vote with stale epoch → should be rejected
+	won := s.recordVote("voter1", 5)
+	if won {
+		t.Fatal("stale epoch vote should be rejected")
+	}
+
+	// Vote with future epoch → should also be rejected
+	won = s.recordVote("voter1", 15)
+	if won {
+		t.Fatal("future epoch vote should be rejected")
 	}
 }

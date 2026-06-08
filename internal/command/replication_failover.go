@@ -1,6 +1,8 @@
 package database
 
 import (
+	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	stdatomic "sync/atomic"
@@ -59,16 +61,11 @@ func execWaitAof(server *Server, args [][]byte) redis.Reply {
 	targetOffset := server.masterStatus.backlog.currentOffset
 	server.masterStatus.mu.RUnlock()
 
-	// For local fsync: if AOF is on, we consider it fsynced once the persister
-	// has flushed. For simplicity, if numLocal <= 0 or AOF is on, local is satisfied.
-	// A real implementation would check the AOF fsync status.
-	localFsynced := int64(1)
+	// For local fsync: report 1 if AOF is on and numLocal>0 (the persister
+	// writes synchronously in everysec mode), otherwise 0. This matches
+	// Redis: WAITAOF 0 0 0 with appendonly no returns [0, 0].
+	localFsynced := int64(0)
 	if numLocal > 0 && config.Properties.AppendOnly {
-		// In a real implementation, we'd wait for the AOF fsync.
-		// For now, consider it immediately fsynced (the persister writes
-		// synchronously in the default everysec mode).
-		localFsynced = 1
-	} else if numLocal <= 0 {
 		localFsynced = 1
 	}
 
@@ -114,21 +111,42 @@ func execWaitAof(server *Server, args [][]byte) redis.Reply {
 //
 //	FAILOVER [TO host port [FORCE]] [ABORT] [TIMEOUT ms]
 //
-// This is the standalone (non-cluster) failover where a replica promotes
-// itself to master. In cluster mode, use CLUSTER FAILOVER instead.
+// In Redis 6.2+, FAILOVER is issued on the master. The master selects a
+// connected replica and initiates a coordinated handoff: the replica is
+// promoted to master and the old master becomes a replica of the new master.
+// In cluster mode, use CLUSTER FAILOVER instead.
 func execFailover(server *Server, args [][]byte) redis.Reply {
 	role := stdatomic.LoadInt32(&server.role)
-	if role != slaveRole {
-		return protocol.MakeErrReply("ERR FAILOVER is only valid when server is a replica")
+	if role != masterRole {
+		return protocol.MakeErrReply("ERR FAILOVER requires a master with connected replicas")
 	}
 
 	// Parse arguments
+	var targetHost string
+	var targetPort int
 	abort := false
 	timeoutMs := 0
 	for i := 0; i < len(args); i++ {
 		switch strings.ToUpper(string(args[i])) {
 		case "ABORT":
 			abort = true
+		case "TO":
+			i++
+			if i >= len(args) {
+				return protocol.MakeArgNumErrReply("failover")
+			}
+			targetHost = string(args[i])
+			i++
+			if i >= len(args) {
+				return protocol.MakeArgNumErrReply("failover")
+			}
+			p, err := strconv.Atoi(string(args[i]))
+			if err != nil {
+				return protocol.MakeErrReply("ERR Invalid target port")
+			}
+			targetPort = p
+		case "FORCE":
+			// FORCE: skip waiting for replica sync (not fully implemented)
 		case "TIMEOUT":
 			i++
 			if i >= len(args) {
@@ -148,13 +166,60 @@ func execFailover(server *Server, args [][]byte) redis.Reply {
 		return protocol.MakeOkReply()
 	}
 
-	// Perform the failover: promote this replica to master
-	server.slaveStatus.mutex.Lock()
-	oldReplid := server.slaveStatus.replId
-	replOffset := server.slaveStatus.replOffset
-	server.slaveStatus.mutex.Unlock()
+	// Find the target replica. If TO is specified, use that; otherwise
+	// pick the first connected replica.
+	server.masterStatus.mu.RLock()
+	var chosen *slaveClient
+	for _, sl := range server.masterStatus.slaveMap {
+		if targetHost != "" {
+			if sl.announceIp == targetHost && sl.announcePort == targetPort {
+				chosen = sl
+				break
+			}
+		} else {
+			chosen = sl
+			break
+		}
+	}
+	server.masterStatus.mu.RUnlock()
 
-	server.promoteToMaster(oldReplid, replOffset)
+	if chosen == nil {
+		if targetHost != "" {
+			return protocol.MakeErrReply(fmt.Sprintf("ERR Replica %s:%d not connected", targetHost, targetPort))
+		}
+		return protocol.MakeErrReply("ERR No connected replicas")
+	}
 
-	return protocol.MakeOkReply()
+	// Connect to the replica's data port and tell it to promote itself.
+	// We use SLAVEOF NO ONE (not the public FAILOVER command, which also
+	// requires masterRole on the receiver). The replica's execSlaveOf
+	// handler calls slaveOfNone() which promotes it to master.
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", chosen.announceIp, chosen.announcePort), time.Second)
+	if err != nil {
+		return protocol.MakeErrReply("ERR Could not connect to replica: " + err.Error())
+	}
+	defer conn.Close()
+
+	promoteCmd := protocol.MakeMultiBulkReply([][]byte{[]byte("SLAVEOF"), []byte("NO"), []byte("ONE")})
+	if _, err := conn.Write(promoteCmd.ToBytes()); err != nil {
+		return protocol.MakeErrReply("ERR Failed to send promotion to replica: " + err.Error())
+	}
+
+	// Read reply (with optional timeout)
+	if timeoutMs > 0 {
+		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(timeoutMs) * time.Millisecond))
+	}
+	buf := make([]byte, 256)
+	n, _ := conn.Read(buf)
+	if n > 0 && buf[0] == '+' {
+		// Replica accepted — now we (the old master) become a replica of it.
+		server.slaveStatus.mutex.Lock()
+		server.slaveStatus.masterHost = chosen.announceIp
+		server.slaveStatus.masterPort = chosen.announcePort
+		server.slaveStatus.mutex.Unlock()
+		stdatomic.StoreInt32(&server.role, slaveRole)
+		return protocol.MakeOkReply()
+	}
+
+	return protocol.MakeErrReply("ERR Failover failed: replica did not accept")
 }

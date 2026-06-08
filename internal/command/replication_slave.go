@@ -82,13 +82,20 @@ func (server *Server) execSlaveOf(c redis.Connection, args [][]byte) redis.Reply
 
 func (server *Server) slaveOfNone() {
 	server.slaveStatus.mutex.Lock()
-	defer server.slaveStatus.mutex.Unlock()
+	// Capture the old master's replid and our replication offset before
+	// clearing, so promoteToMaster can shift them into replid2 / secondReplOffset
+	// for PSYNC2 cross-failover partial resync.
+	oldReplid := server.slaveStatus.replId
+	replOffset := server.slaveStatus.replOffset
 	server.slaveStatus.masterHost = ""
 	server.slaveStatus.masterPort = 0
 	server.slaveStatus.replId = ""
 	server.slaveStatus.replOffset = -1
 	server.slaveStatus.stopSlaveWithMutex()
-	server.role = masterRole
+	server.slaveStatus.mutex.Unlock()
+
+	// Promote via the shared path that sets replid2 = oldReplid.
+	server.promoteToMaster(oldReplid, replOffset)
 }
 
 // stopSlaveWithMutex stops in-progress connectWithMaster/fullSync/receiveAOF

@@ -257,7 +257,7 @@ func (g *gossipBus) handleConn(conn net.Conn) {
 
 	// Handle failover auth ack: the requesting replica tallies a vote.
 	if h.msgType == msgTypeFailoverAuthAck {
-		g.handleAuthAck(h)
+		g.handleAuthAck(h, decodeGossip(gossipBuf, int(h.gossipCount)))
 	}
 }
 
@@ -333,6 +333,10 @@ func (g *gossipBus) mergeFromMessage(h *clusterMsgHeader, entries []gossipEntry,
 }
 
 // buildMessage assembles a header + gossip section reflecting our current view.
+// FAIL'd nodes are always included first (up to maxGossip) so that failure
+// propagation is not lost when the cluster has more nodes than the sample cap.
+const maxGossip = 3
+
 func (g *gossipBus) buildMessage(msgType uint16) []byte {
 	g.state.mu.RLock()
 	h := clusterMsgHeader{
@@ -345,16 +349,33 @@ func (g *gossipBus) buildMessage(msgType uint16) []byte {
 		senderID:     g.state.self.id,
 		slots:        g.state.self.slots,
 	}
+	// Prioritize FAIL'd nodes so failure propagation is reliable.
 	var entries []gossipEntry
 	for _, n := range g.state.nodes {
 		if n.id == g.state.self.id {
 			continue
 		}
-		entries = append(entries, gossipEntry{
-			id: n.id, ip: n.ip, port: uint32(n.port), cport: uint32(n.cport), flags: n.flags,
-		})
-		if len(entries) >= 3 { // small sample, like redis
-			break
+		if n.flags&flagFail != 0 {
+			entries = append(entries, gossipEntry{
+				id: n.id, ip: n.ip, port: uint32(n.port), cport: uint32(n.cport), flags: n.flags,
+			})
+			if len(entries) >= maxGossip {
+				break
+			}
+		}
+	}
+	// Fill remaining slots with non-FAIL nodes.
+	if len(entries) < maxGossip {
+		for _, n := range g.state.nodes {
+			if n.id == g.state.self.id || n.flags&flagFail != 0 {
+				continue
+			}
+			entries = append(entries, gossipEntry{
+				id: n.id, ip: n.ip, port: uint32(n.port), cport: uint32(n.cport), flags: n.flags,
+			})
+			if len(entries) >= maxGossip {
+				break
+			}
 		}
 	}
 	g.state.mu.RUnlock()
@@ -411,6 +432,13 @@ func (g *gossipBus) pingLoop() {
 			// Check for timed-out peers (PFAIL detection)
 			if timeout := config.Properties.ClusterNodeTimeout; timeout > 0 {
 				g.state.markPFailIfTimedOut(int64(timeout))
+				// Promote PFAIL → FAIL when quorum of masters agrees,
+				// then broadcast the FAIL so all nodes learn about it.
+				for _, nodeID := range g.state.pfailNodeIDs() {
+					if g.state.markNodeFail(nodeID) {
+						g.broadcastMessage(msgTypeFail)
+					}
+				}
 				// Check if we should trigger/check a failover election
 				g.state.checkFailoverTick(g)
 			}
@@ -472,7 +500,9 @@ func (g *gossipBus) handleFailMessage(h *clusterMsgHeader) {
 //   - not yet voted this epoch (lastVoteEpoch < reqEpoch)
 //   - the requesting replica's master is FAIL
 //
-// On grant, send AUTH_ACK back and update lastVoteEpoch.
+// On grant, deliver a targeted AUTH_ACK via a fresh dial to the candidate's
+// cport. The ACK carries the candidate's ID in a gossip entry and the
+// election epoch in configEpoch so the replica can verify the vote is for it.
 func (g *gossipBus) handleAuthRequest(h *clusterMsgHeader) {
 	// This node must be a master to vote
 	g.state.mu.RLock()
@@ -501,25 +531,79 @@ func (g *gossipBus) handleAuthRequest(h *clusterMsgHeader) {
 	}
 
 	if g.state.grantVote(replicaID, masterID, reqEpoch) {
-		// Send AUTH_ACK back to the replica
-		g.broadcastMessage(msgTypeFailoverAuthAck)
+		// Build a targeted AUTH_ACK: senderID=voting master,
+		// configEpoch=election epoch, gossip entry=candidate replica.
+		g.state.mu.RLock()
+		ack := clusterMsgHeader{
+			msgType:      msgTypeFailoverAuthAck,
+			currentEpoch: g.state.epoch,
+			configEpoch:  reqEpoch,
+			port:         uint32(g.state.self.port),
+			cport:        uint32(g.state.self.cport),
+			flags:        g.state.self.flags,
+			senderID:     g.state.self.id,
+			slots:        g.state.self.slots,
+		}
+		// Look up candidate's bus address for fresh dial
+		var candidateIP string
+		var candidateCport int
+		if replica != nil {
+			candidateIP = replica.ip
+			candidateCport = replica.cport
+		}
+		g.state.mu.RUnlock()
+
+		// Include the requesting replica as a gossip entry so it can
+		// verify the ACK is targeted at it.
+		entries := []gossipEntry{{id: replicaID}}
+		body := encodeGossip(entries)
+		ack.gossipCount = 1
+		ack.totalLen = uint32(headerLen + len(body))
+		msg := append(encodeHeader(&ack), body...)
+
+		// Deliver via fresh dial — the candidate's broadcastMessage
+		// closed the inbound connection, so conn.Write would fail.
+		if candidateIP != "" && candidateCport != 0 {
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", candidateIP, candidateCport), time.Second)
+			if err != nil {
+				return
+			}
+			_, _ = conn.Write(msg)
+			_ = conn.Close()
+		}
 	}
 }
 
 // handleAuthAck processes a FAILOVER_AUTH_ACK from a master.
 // The requesting replica tallies votes; on majority it can proceed.
-func (g *gossipBus) handleAuthAck(h *clusterMsgHeader) {
+// The ACK must carry our ID in the gossip section and our election epoch
+// in configEpoch; otherwise it's a stale or misrouted vote.
+func (g *gossipBus) handleAuthAck(h *clusterMsgHeader, gossipEntries []gossipEntry) {
 	// We're a replica and this is a vote from a master
 	g.state.mu.RLock()
 	isReplica := g.state.self.flags&flagSlave != 0
+	selfID := g.state.self.id
 	g.state.mu.RUnlock()
 
 	if !isReplica {
 		return
 	}
 
-	// Record the vote
-	_ = g.state.recordVote(h.senderID)
+	// Verify the ACK is targeted at us: the gossip section must contain
+	// our node ID as the candidate.
+	targeted := false
+	for _, e := range gossipEntries {
+		if e.id == selfID {
+			targeted = true
+			break
+		}
+	}
+	if !targeted {
+		return
+	}
+
+	// Record the vote, passing the election epoch from configEpoch.
+	_ = g.state.recordVote(h.senderID, h.configEpoch)
 	// If the election is won, claimOwnership will be called on the next
 	// checkFailoverTick from the pingLoop.
 }

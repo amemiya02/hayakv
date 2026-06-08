@@ -9,14 +9,12 @@ import (
 // (PFAIL → FAIL), the node is marked as definitively failed.
 type failureReports struct {
 	// m maps nodeID → reporterID → timestamp (unix ms)
-	m      map[string]map[string]int64
-	quorum int
+	m map[string]map[string]int64
 }
 
-func newFailureReports(quorum int) *failureReports {
+func newFailureReports() *failureReports {
 	return &failureReports{
-		m:      make(map[string]map[string]int64),
-		quorum: quorum,
+		m: make(map[string]map[string]int64),
 	}
 }
 
@@ -34,9 +32,25 @@ func (fr *failureReports) count(nodeID string) int {
 	return len(fr.m[nodeID])
 }
 
-// hasQuorum reports whether nodeID has enough PFAIL reports to be marked FAIL.
-func (fr *failureReports) hasQuorum(nodeID string) bool {
-	return fr.count(nodeID) >= fr.quorum
+// hasQuorum reports whether nodeID has enough PFAIL reports from masters to be
+// marked FAIL. Quorum is computed as masters/2 + 1 (majority of masters in the
+// cluster). Only master reporters are counted (replicas are excluded).
+// nodes is the cluster's node map, used to check reporter flags.
+func (fr *failureReports) hasQuorum(nodeID string, masterCount int, nodes map[string]*clusterNode) bool {
+	quorum := masterCount/2 + 1
+	reports, ok := fr.m[nodeID]
+	if !ok {
+		return false
+	}
+	count := 0
+	for reporterID := range reports {
+		if reporterID != "" {
+			if n, exists := nodes[reporterID]; exists && n.flags&flagMaster != 0 {
+				count++
+			}
+		}
+	}
+	return count >= quorum
 }
 
 // cleanup removes reports older than 2*nodeTimeout for a given node.
@@ -88,11 +102,44 @@ func (s *clusterState) markNodeFail(nodeID string) bool {
 	if !ok || n.flags&flagFail != 0 {
 		return false
 	}
-	// Count how many masters (excluding self) have PFAIL reports for this node
-	if s.failureReports != nil && s.failureReports.hasQuorum(nodeID) {
+	// Count masters (caller holds s.mu, so count inline)
+	masters := 0
+	for _, nd := range s.nodes {
+		if nd.flags&flagMaster != 0 {
+			masters++
+		}
+	}
+	if s.failureReports != nil && s.failureReports.hasQuorum(nodeID, masters, s.nodes) {
 		n.flags &^= flagPFail
 		n.flags |= flagFail
 		return true
 	}
 	return false
+}
+
+// pfailNodeIDs returns the IDs of nodes currently marked PFAIL (but not FAIL).
+func (s *clusterState) pfailNodeIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var ids []string
+	for _, n := range s.nodes {
+		if n.id == s.self.id {
+			continue
+		}
+		if n.flags&flagPFail != 0 && n.flags&flagFail == 0 {
+			ids = append(ids, n.id)
+		}
+	}
+	return ids
+}
+
+// masterCountUnderLock returns the number of masters. Caller must hold s.mu.
+func (s *clusterState) masterCountUnderLock() int {
+	count := 0
+	for _, n := range s.nodes {
+		if n.flags&flagMaster != 0 {
+			count++
+		}
+	}
+	return count
 }

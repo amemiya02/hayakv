@@ -81,11 +81,13 @@ func (s *clusterState) startElection(failedMasterID string, bus *gossipBus) {
 	masters := s.masterCount()
 	votesNeeded := masters/2 + 1
 
-	// Initialize failover state
+	// Initialize failover state. Do NOT self-seed: the candidate is a replica,
+	// not a master, so its own vote doesn't count toward the master quorum.
+	// Redis requires votesNeeded master votes (majority of masters).
 	fs := &failoverState{
 		active:         true,
 		authTimeout:    time.Now().Add(2 * time.Second),
-		votesReceived:  map[string]bool{s.self.id: true}, // we count ourselves
+		votesReceived:  map[string]bool{},
 		votesNeeded:    votesNeeded,
 		reqEpoch:       reqEpoch,
 		failedMasterID: failedMasterID,
@@ -103,7 +105,8 @@ func (s *clusterState) startElection(failedMasterID string, bus *gossipBus) {
 
 // recordVote records a vote (AUTH_ACK) from a master.
 // Returns true if the election is won (quorum reached).
-func (s *clusterState) recordVote(voterID string) bool {
+// voteEpoch must match the current election's reqEpoch; stale votes are ignored.
+func (s *clusterState) recordVote(voterID string, voteEpoch uint64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -115,6 +118,11 @@ func (s *clusterState) recordVote(voterID string) bool {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
+	// Ignore votes for a different election epoch (stale or future).
+	if voteEpoch != fs.reqEpoch {
+		return false
+	}
+
 	if fs.votesReceived[voterID] {
 		return false // duplicate vote
 	}
@@ -124,7 +132,7 @@ func (s *clusterState) recordVote(voterID string) bool {
 }
 
 // claimOwnership promotes this replica to master and claims the failed master's slots.
-// Called when the election is won.
+// Called when the election is won. Does NOT bump epoch — startElection already did.
 func (s *clusterState) claimOwnership(failedMasterID string) {
 	s.mu.Lock()
 	failedMaster, ok := s.nodes[failedMasterID]
@@ -132,9 +140,6 @@ func (s *clusterState) claimOwnership(failedMasterID string) {
 		s.mu.Unlock()
 		return
 	}
-
-	// Bump epoch for the ownership change
-	s.epoch++
 
 	// Flip self from replica to master
 	s.self.flags &^= flagSlave
@@ -153,7 +158,9 @@ func (s *clusterState) claimOwnership(failedMasterID string) {
 
 	// Clear failover state
 	if s.failoverState != nil {
+		s.failoverState.mu.Lock()
 		s.failoverState.active = false
+		s.failoverState.mu.Unlock()
 	}
 	s.mu.Unlock()
 
@@ -204,33 +211,64 @@ func (s *clusterState) checkFailoverTick(bus *gossipBus) {
 		return
 	}
 
-	// If we're already running an election, check if we won
-	if fs != nil && fs.active {
+	// If we're already running an election, check if we won.
+	// Read fs.active under fs.mu to avoid racing with claimOwnership.
+	if fs != nil {
 		fs.mu.Lock()
-		won := len(fs.votesReceived) >= fs.votesNeeded
-		timedOut := time.Now().After(fs.authTimeout)
+		active := fs.active
+		won := active && len(fs.votesReceived) >= fs.votesNeeded
+		timedOut := active && time.Now().After(fs.authTimeout)
 		fs.mu.Unlock()
 
-		if won {
-			s.claimOwnership(masterID)
-			// Broadcast our new state
-			if bus != nil {
-				bus.broadcastMessage(msgTypePong)
+		if active {
+			if won {
+				s.claimOwnership(masterID)
+				// Broadcast our new state
+				if bus != nil {
+					bus.broadcastMessage(msgTypePong)
+				}
+			} else if timedOut {
+				// Election failed, reset
+				s.mu.Lock()
+				if s.failoverState != nil {
+					s.failoverState.mu.Lock()
+					s.failoverState.active = false
+					s.failoverState.mu.Unlock()
+				}
+				s.mu.Unlock()
 			}
-		} else if timedOut {
-			// Election failed, reset
-			s.mu.Lock()
-			if s.failoverState != nil {
-				s.failoverState.active = false
-			}
-			s.mu.Unlock()
+			return
 		}
+		// Election already concluded (active=false); fall through to
+		// start a new election below.
+	}
+
+	// Start a new election with a delay based on replication rank.
+	// The delay staggers replicas so they don't all start simultaneously.
+	// Use a proper hash of the nodeID for wide jitter spread.
+	s.mu.RLock()
+	jitter := nodeIDJitter(s.self.id)
+	s.mu.RUnlock()
+	time.Sleep(time.Duration(500+jitter) * time.Millisecond)
+
+	// Re-check: another replica may have already won.
+	s.mu.RLock()
+	master = s.nodes[masterID]
+	stillFail := master != nil && master.flags&flagFail != 0
+	s.mu.RUnlock()
+	if !stillFail {
 		return
 	}
 
-	// Start a new election with a delay based on replication rank
-	// (the most up-to-date replica starts earliest).
-	// For simplicity, we start immediately. A production implementation
-	// would add: delay = 500ms + random(0, 500ms) * rank
 	s.startElection(masterID, bus)
+}
+
+// nodeIDJitter returns a deterministic jitter in [0, 500)ms based on the
+// node ID. Uses a simple hash of all hex chars for wide spread.
+func nodeIDJitter(id string) int64 {
+	var sum uint32
+	for i := 0; i < len(id); i++ {
+		sum = sum*31 + uint32(id[i])
+	}
+	return int64(sum % 500)
 }
