@@ -9,6 +9,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/datastruct/bitmap"
 	"github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
+	"github.com/amemiya02/hayakv/internal/lib/digest"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
 	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/persist/aof"
@@ -133,9 +134,13 @@ func execSet(db *DB, args [][]byte) redis.Reply {
 	policy := upsertPolicy
 	ttl := unlimitedTTL
 	var ifeqValue string
-	var ifgtValue string
+	var ifneValue string
+	var ifdeqDigest string
+	var ifdneDigest string
 	hasIfeq := false
-	hasIfgt := false
+	hasIfne := false
+	hasIfdeq := false
+	hasIfdne := false
 
 	// parse options
 	if len(args) > 2 {
@@ -191,12 +196,26 @@ func execSet(db *DB, args [][]byte) redis.Reply {
 				ifeqValue = string(args[i+1])
 				hasIfeq = true
 				i++
-			} else if arg == "IFGT" {
+			} else if arg == "IFNE" {
 				if i+1 >= len(args) {
 					return &protocol.SyntaxErrReply{}
 				}
-				ifgtValue = string(args[i+1])
-				hasIfgt = true
+				ifneValue = string(args[i+1])
+				hasIfne = true
+				i++
+			} else if arg == "IFDEQ" {
+				if i+1 >= len(args) {
+					return &protocol.SyntaxErrReply{}
+				}
+				ifdeqDigest = string(args[i+1])
+				hasIfdeq = true
+				i++
+			} else if arg == "IFDNE" {
+				if i+1 >= len(args) {
+					return &protocol.SyntaxErrReply{}
+				}
+				ifdneDigest = string(args[i+1])
+				hasIfdne = true
 				i++
 			} else {
 				return &protocol.SyntaxErrReply{}
@@ -204,7 +223,7 @@ func execSet(db *DB, args [][]byte) redis.Reply {
 		}
 	}
 
-	// Check IFEQ/IFGT conditions before writing
+	// Check conditional options before writing
 	if hasIfeq {
 		existing, err := db.getAsString(key)
 		if err != nil {
@@ -214,7 +233,17 @@ func execSet(db *DB, args [][]byte) redis.Reply {
 			return &protocol.NullBulkReply{}
 		}
 	}
-	if hasIfgt {
+	if hasIfne {
+		existing, err := db.getAsString(key)
+		if err != nil {
+			return err
+		}
+		// IFNE: set if key absent OR current value != given value
+		if existing != nil && string(existing) == ifneValue {
+			return &protocol.NullBulkReply{}
+		}
+	}
+	if hasIfdeq {
 		existing, err := db.getAsString(key)
 		if err != nil {
 			return err
@@ -222,13 +251,22 @@ func execSet(db *DB, args [][]byte) redis.Reply {
 		if existing == nil {
 			return &protocol.NullBulkReply{}
 		}
-		existingVal, eErr := strconv.ParseFloat(string(existing), 64)
-		newVal, nErr := strconv.ParseFloat(ifgtValue, 64)
-		if eErr != nil || nErr != nil {
-			return protocol.MakeErrReply("ERR value is not a valid float")
-		}
-		if existingVal <= newVal {
+		curDigest := digest.ValueDigest(existing)
+		if curDigest != ifdeqDigest {
 			return &protocol.NullBulkReply{}
+		}
+	}
+	if hasIfdne {
+		existing, err := db.getAsString(key)
+		if err != nil {
+			return err
+		}
+		// IFDNE: set if key absent OR current digest differs
+		if existing != nil {
+			curDigest := digest.ValueDigest(existing)
+			if curDigest == ifdneDigest {
+				return &protocol.NullBulkReply{}
+			}
 		}
 	}
 
@@ -337,6 +375,22 @@ func prepareMSet(args [][]byte) ([]string, []string) {
 	keys := make([]string, size)
 	for i := 0; i < size; i++ {
 		keys[i] = string(args[2*i])
+	}
+	return keys, nil
+}
+
+func prepareMSetEX(args [][]byte) ([]string, []string) {
+	// MSETEX numkeys k1 v1 k2 v2 [opts...]
+	if len(args) < 1 {
+		return nil, nil
+	}
+	numkeys, err := strconv.Atoi(string(args[0]))
+	if err != nil || numkeys < 1 {
+		return nil, nil
+	}
+	keys := make([]string, 0, numkeys)
+	for i := 0; i < numkeys && 1+2*i+1 < len(args); i++ {
+		keys = append(keys, string(args[1+2*i]))
 	}
 	return keys, nil
 }
@@ -887,33 +941,136 @@ func getRandomKey(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeBulkReply([]byte(k[0]))
 }
 
-// execMSetEX sets multiple key-value pairs with a shared TTL in seconds
+// execMSetEX implements MSETEX numkeys k v [k v…] [NX|XX] [EX s|PX ms|EXAT|PXAT|KEEPTTL].
+// First arg is numkeys (count of key-value pairs), then that many pairs,
+// then optional NX|XX and expiry options. Expiry is optional.
 func execMSetEX(db *DB, args [][]byte) redis.Reply {
-	if len(args) < 3 || (len(args)-1)%2 != 0 {
+	if len(args) < 3 {
 		return protocol.MakeSyntaxErrReply()
 	}
-	ttlArg, err := strconv.ParseInt(string(args[0]), 10, 64)
-	if err != nil {
+	numkeys, err := strconv.Atoi(string(args[0]))
+	if err != nil || numkeys < 1 {
 		return protocol.MakeErrReply("ERR value is not an integer or out of range")
 	}
-	if ttlArg <= 0 {
-		return protocol.MakeErrReply("ERR invalid expire time in msetex")
+	// Need exactly numkeys*2 args for k/v pairs after numkeys
+	kvEnd := 1 + numkeys*2
+	if kvEnd > len(args) {
+		return protocol.MakeErrReply("ERR wrong number of key-value pairs")
 	}
-	ttl := ttlArg * 1000 // convert to ms
 
-	kvArgs := args[1:]
-	size := len(kvArgs) / 2
-	keys := make([]string, size)
-	for i := 0; i < size; i++ {
+	// Parse optional NX|XX and expiry after the pairs
+	policy := upsertPolicy
+	ttl := unlimitedTTL
+	for i := kvEnd; i < len(args); i++ {
+		arg := strings.ToUpper(string(args[i]))
+		if arg == "NX" {
+			if policy == updatePolicy {
+				return &protocol.SyntaxErrReply{}
+			}
+			policy = insertPolicy
+		} else if arg == "XX" {
+			if policy == insertPolicy {
+				return &protocol.SyntaxErrReply{}
+			}
+			policy = updatePolicy
+		} else if arg == "EX" {
+			if ttl != unlimitedTTL {
+				return &protocol.SyntaxErrReply{}
+			}
+			if i+1 >= len(args) {
+				return &protocol.SyntaxErrReply{}
+			}
+			ttlArg, e := strconv.ParseInt(string(args[i+1]), 10, 64)
+			if e != nil || ttlArg <= 0 {
+				return protocol.MakeErrReply("ERR invalid expire time in msetex")
+			}
+			ttl = ttlArg * 1000
+			i++
+		} else if arg == "PX" {
+			if ttl != unlimitedTTL {
+				return &protocol.SyntaxErrReply{}
+			}
+			if i+1 >= len(args) {
+				return &protocol.SyntaxErrReply{}
+			}
+			ttlArg, e := strconv.ParseInt(string(args[i+1]), 10, 64)
+			if e != nil || ttlArg <= 0 {
+				return protocol.MakeErrReply("ERR invalid expire time in msetex")
+			}
+			ttl = ttlArg
+			i++
+		} else if arg == "EXAT" {
+			if ttl != unlimitedTTL {
+				return &protocol.SyntaxErrReply{}
+			}
+			if i+1 >= len(args) {
+				return &protocol.SyntaxErrReply{}
+			}
+			ts, e := strconv.ParseInt(string(args[i+1]), 10, 64)
+			if e != nil || ts <= 0 {
+				return protocol.MakeErrReply("ERR invalid expire time in msetex")
+			}
+			ttl = ts*1000 - time.Now().UnixMilli()
+			if ttl < 0 {
+				ttl = -2 // sentinel: already expired
+			}
+			i++
+		} else if arg == "PXAT" {
+			if ttl != unlimitedTTL {
+				return &protocol.SyntaxErrReply{}
+			}
+			if i+1 >= len(args) {
+				return &protocol.SyntaxErrReply{}
+			}
+			ts, e := strconv.ParseInt(string(args[i+1]), 10, 64)
+			if e != nil || ts <= 0 {
+				return protocol.MakeErrReply("ERR invalid expire time in msetex")
+			}
+			ttl = ts - time.Now().UnixMilli()
+			if ttl < 0 {
+				ttl = -2 // sentinel: already expired
+			}
+			i++
+		} else if arg == "KEEPTTL" {
+			// KEEPTTL: don't change existing TTL, don't set new one
+			ttl = -1 // sentinel
+		} else {
+			return &protocol.SyntaxErrReply{}
+		}
+	}
+
+	// Set key-value pairs
+	kvArgs := args[1:kvEnd]
+	keys := make([]string, numkeys)
+	for i := 0; i < numkeys; i++ {
 		keys[i] = string(kvArgs[2*i])
 		value := kvArgs[2*i+1]
-		db.PutEntity(keys[i], &database.DataEntity{Data: object.MakeStringObject(value)})
+		entity := &database.DataEntity{Data: object.MakeStringObject(value)}
+		switch policy {
+		case upsertPolicy:
+			db.PutEntity(keys[i], entity)
+		case insertPolicy:
+			db.PutIfAbsent(keys[i], entity)
+		case updatePolicy:
+			db.PutIfExists(keys[i], entity)
+		}
 	}
 
-	expireTime := time.Now().Add(time.Duration(ttl) * time.Millisecond)
-	for _, key := range keys {
-		db.Expire(key, expireTime)
+	// Apply TTL
+	if ttl > 0 {
+		expireTime := time.Now().Add(time.Duration(ttl) * time.Millisecond)
+		for _, key := range keys {
+			db.Expire(key, expireTime)
+		}
+	} else if ttl == -2 {
+		// EXAT/PXAT already expired — expire immediately
+		expireTime := time.Now()
+		for _, key := range keys {
+			db.Expire(key, expireTime)
+		}
 	}
+	// ttl == -1 (KEEPTTL) or unlimitedTTL (0): don't touch TTL
+
 	db.addAof(utils.ToCmdLine3("msetex", args...))
 	return &protocol.OkReply{}
 }
@@ -939,7 +1096,7 @@ func init() {
 	registerCommand("MSetNX", execMSetNX, prepareMSet, undoMSet, -3, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM}, 1, -1, 2).
 		attachNotify(notifyString, "set")
-	registerCommand("MSetEX", execMSetEX, prepareMSet, undoMSet, -4, flagWrite).
+	registerCommand("MSetEX", execMSetEX, prepareMSetEX, undoMSet, -3, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM}, 1, -1, 2).
 		attachNotify(notifyString, "set")
 	registerCommand("Get", execGet, readFirstKey, nil, 2, flagReadOnly).

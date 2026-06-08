@@ -12,19 +12,23 @@ var (
 
 // parseUint parses a non-negative integer from buf without allocating.
 // Returns the value and true on success, or (0, false) on overflow/invalid.
+// Rejects values that would overflow int (>= 1<<63 on 64-bit platforms).
 func parseUint(buf []byte) (int, bool) {
 	if len(buf) == 0 {
 		return 0, false
 	}
+	const maxInt = int(^uint(0) >> 1) // max value for int
 	n := 0
 	for _, b := range buf {
 		if b < '0' || b > '9' {
 			return 0, false
 		}
-		n = n*10 + int(b-'0')
-		if n < 0 { // overflow
+		digit := int(b - '0')
+		// Check overflow before it happens: n*10+digit > maxInt
+		if n > (maxInt-digit)/10 {
 			return 0, false
 		}
+		n = n*10 + digit
 	}
 	return n, true
 }

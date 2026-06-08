@@ -443,19 +443,63 @@ func TestScan(t *testing.T) {
 
 func TestDelEx(t *testing.T) {
 	testDB.Flush()
-	testDB.Exec(nil, utils.ToCmdLine("MSET", "a", "1", "b", "2"))
-	actual := testDB.Exec(nil, utils.ToCmdLine("DELEX", "a", "b", "c"))
-	if string(actual.ToBytes()) != ":2\r\n" {
-		t.Fatal("DELEX should delete existing keys and return the count")
-	}
+	testDB.Exec(nil, utils.ToCmdLine("SET", "a", "hello"))
 
-	// Verify keys deleted
+	// DELEX existing key (no condition)
+	actual := testDB.Exec(nil, utils.ToCmdLine("DELEX", "a"))
+	if string(actual.ToBytes()) != ":1\r\n" {
+		t.Fatal("DELEX existing key should return 1")
+	}
 	actual = testDB.Exec(nil, utils.ToCmdLine("GET", "a"))
 	if string(actual.ToBytes()) != "$-1\r\n" {
 		t.Fatal("DELEX should have deleted key a")
 	}
-	actual = testDB.Exec(nil, utils.ToCmdLine("GET", "b"))
-	if string(actual.ToBytes()) != "$-1\r\n" {
-		t.Fatal("DELEX should have deleted key b")
+
+	// DELEX non-existing key
+	actual = testDB.Exec(nil, utils.ToCmdLine("DELEX", "nokey"))
+	if string(actual.ToBytes()) != ":0\r\n" {
+		t.Fatal("DELEX non-existing key should return 0")
+	}
+}
+
+func TestDelExIFEQ(t *testing.T) {
+	testDB.Flush()
+	testDB.Exec(nil, utils.ToCmdLine("SET", "a", "hello"))
+
+	// DELEX IFEQ matching value
+	actual := testDB.Exec(nil, utils.ToCmdLine("DELEX", "a", "IFEQ", "hello"))
+	if string(actual.ToBytes()) != ":1\r\n" {
+		t.Fatal("DELEX IFEQ matching should return 1")
+	}
+
+	// DELEX IFEQ non-matching value
+	testDB.Exec(nil, utils.ToCmdLine("SET", "b", "world"))
+	actual = testDB.Exec(nil, utils.ToCmdLine("DELEX", "b", "IFEQ", "nope"))
+	if string(actual.ToBytes()) != ":0\r\n" {
+		t.Fatal("DELEX IFEQ non-matching should return 0")
+	}
+}
+
+func TestDelExIFNE(t *testing.T) {
+	testDB.Flush()
+	testDB.Exec(nil, utils.ToCmdLine("SET", "a", "hello"))
+
+	// DELEX IFNE value differs -> delete
+	actual := testDB.Exec(nil, utils.ToCmdLine("DELEX", "a", "IFNE", "world"))
+	if string(actual.ToBytes()) != ":1\r\n" {
+		t.Fatal("DELEX IFNE differing value should return 1")
+	}
+
+	// DELEX IFNE value matches -> no delete
+	testDB.Exec(nil, utils.ToCmdLine("SET", "b", "hello"))
+	actual = testDB.Exec(nil, utils.ToCmdLine("DELEX", "b", "IFNE", "hello"))
+	if string(actual.ToBytes()) != ":0\r\n" {
+		t.Fatal("DELEX IFNE matching value should return 0")
+	}
+
+	// DELEX IFNE key absent -> return 0
+	actual = testDB.Exec(nil, utils.ToCmdLine("DELEX", "nokey", "IFNE", "x"))
+	if string(actual.ToBytes()) != ":0\r\n" {
+		t.Fatal("DELEX IFNE absent key should return 0")
 	}
 }

@@ -1,20 +1,22 @@
 package database
 
 import (
+	"math"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/amemiya02/hayakv/internal/datastruct/dict"
 	"github.com/amemiya02/hayakv/internal/datastruct/list"
 	"github.com/amemiya02/hayakv/internal/datastruct/set"
 	"github.com/amemiya02/hayakv/internal/datastruct/sortedset"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
+	"github.com/amemiya02/hayakv/internal/lib/digest"
 	"github.com/amemiya02/hayakv/internal/lib/utils"
 	"github.com/amemiya02/hayakv/internal/lib/wildcard"
 	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/persist/aof"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
-	"math"
-	"strconv"
-	"strings"
-	"time"
 )
 
 // execDel removes a key from db
@@ -31,17 +33,94 @@ func execDel(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeIntReply(int64(deleted))
 }
 
-// execDelEX removes keys and returns count (identical to DEL semantics)
+// execDelEX implements DELEX key [IFEQ v|IFNE v|IFDEQ digest|IFDNE digest].
+// Single-key conditional delete. Returns 1 if deleted, 0 otherwise.
 func execDelEX(db *DB, args [][]byte) redis.Reply {
-	keys := make([]string, len(args))
-	for i, v := range args {
-		keys[i] = string(v)
+	if len(args) < 1 || len(args) > 3 {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'delex' command")
 	}
-	deleted := db.Removes(keys...)
-	if deleted > 0 {
+	key := string(args[0])
+
+	// No condition: plain delete
+	if len(args) == 1 {
+		_, exists := db.GetEntity(key)
+		if !exists {
+			return protocol.MakeIntReply(0)
+		}
+		db.Remove(key)
 		db.addAof(utils.ToCmdLine3("delex", args...))
+		return protocol.MakeIntReply(1)
 	}
-	return protocol.MakeIntReply(int64(deleted))
+
+	// Parse condition
+	cond := strings.ToUpper(string(args[1]))
+	if len(args) != 3 {
+		return protocol.MakeErrReply("ERR wrong number of arguments for 'delex' command")
+	}
+	condVal := args[2]
+
+	// Read current value
+	current, getErr := db.getAsString(key)
+	if getErr != nil {
+		return getErr
+	}
+
+	switch cond {
+	case "IFEQ":
+		// Delete only if current value == condVal
+		if current == nil {
+			return protocol.MakeIntReply(0)
+		}
+		if string(current) != string(condVal) {
+			return protocol.MakeIntReply(0)
+		}
+		db.Remove(key)
+		db.addAof(utils.ToCmdLine3("delex", args...))
+		return protocol.MakeIntReply(1)
+
+	case "IFNE":
+		// Delete if key absent OR current value != condVal
+		if current == nil {
+			// key doesn't exist — nothing to delete, return 0
+			return protocol.MakeIntReply(0)
+		}
+		if string(current) == string(condVal) {
+			// value matches — condition fails
+			return protocol.MakeIntReply(0)
+		}
+		db.Remove(key)
+		db.addAof(utils.ToCmdLine3("delex", args...))
+		return protocol.MakeIntReply(1)
+
+	case "IFDEQ":
+		// Delete if current value's digest matches condVal (hex)
+		if current == nil {
+			return protocol.MakeIntReply(0)
+		}
+		curDigest := digest.ValueDigest(current)
+		if curDigest != string(condVal) {
+			return protocol.MakeIntReply(0)
+		}
+		db.Remove(key)
+		db.addAof(utils.ToCmdLine3("delex", args...))
+		return protocol.MakeIntReply(1)
+
+	case "IFDNE":
+		// Delete if key absent OR current value's digest differs
+		if current == nil {
+			return protocol.MakeIntReply(0)
+		}
+		curDigest := digest.ValueDigest(current)
+		if curDigest == string(condVal) {
+			return protocol.MakeIntReply(0)
+		}
+		db.Remove(key)
+		db.addAof(utils.ToCmdLine3("delex", args...))
+		return protocol.MakeIntReply(1)
+
+	default:
+		return protocol.MakeErrReply("ERR Invalid condition. Use IFEQ, IFNE, IFDEQ, or IFDNE")
+	}
 }
 
 func undoDel(db *DB, args [][]byte) []CmdLine {
@@ -610,8 +689,8 @@ func init() {
 	registerCommand("Del", execDel, writeAllKeys, undoDel, -2, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite}, 1, -1, 1).
 		attachNotify(notifyGeneric, "del")
-	registerCommand("DelEX", execDelEX, writeAllKeys, undoDel, -2, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite}, 1, -1, 1).
+	registerCommand("DelEX", execDelEX, writeFirstKey, rollbackFirstKey, -2, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite}, 1, 1, 1).
 		attachNotify(notifyGeneric, "del")
 	registerCommand("Expire", execExpire, writeFirstKey, undoExpire, -3, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).

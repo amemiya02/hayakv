@@ -838,34 +838,39 @@ func TestSetIfEq(t *testing.T) {
 	}
 }
 
-func TestSetIfGt(t *testing.T) {
+func TestSetIfNe(t *testing.T) {
 	testDB.Flush()
 	key := utils.RandString(10)
-	testDB.Exec(nil, utils.ToCmdLine("SET", key, "10"))
 
-	// IFGT where existing > threshold should apply
-	actual := testDB.Exec(nil, utils.ToCmdLine("SET", key, "20", "IFGT", "5"))
+	// IFNE on absent key -> should create
+	actual := testDB.Exec(nil, utils.ToCmdLine("SET", key, "10", "IFNE", "10"))
 	if string(actual.ToBytes()) != "+OK\r\n" {
-		t.Fatal("SET IFGT where existing > threshold should apply")
+		t.Fatal("SET IFNE on absent key should create")
 	}
 
-	// IFGT where existing <= threshold should be null (no write)
-	actual = testDB.Exec(nil, utils.ToCmdLine("SET", key, "30", "IFGT", "25"))
+	// IFNE where current value differs -> should update
+	actual = testDB.Exec(nil, utils.ToCmdLine("SET", key, "20", "IFNE", "99"))
+	if string(actual.ToBytes()) != "+OK\r\n" {
+		t.Fatal("SET IFNE with differing value should update")
+	}
+
+	// IFNE where current value matches -> should skip
+	actual = testDB.Exec(nil, utils.ToCmdLine("SET", key, "30", "IFNE", "20"))
 	if string(actual.ToBytes()) != "$-1\r\n" {
-		t.Fatal("SET IFGT where existing <= threshold should be null (no write)")
+		t.Fatal("SET IFNE with matching value should skip")
 	}
 
 	// Verify value unchanged
 	actual = testDB.Exec(nil, utils.ToCmdLine("GET", key))
 	if string(actual.ToBytes()) != "$2\r\n20\r\n" {
-		t.Fatal("IFGT mismatch must not have written")
+		t.Fatal("IFNE match should not have written")
 	}
 }
 
 func TestMSetEX(t *testing.T) {
 	testDB.Flush()
-	// MSETEX seconds key1 value1 key2 value2
-	actual := testDB.Exec(nil, utils.ToCmdLine("MSETEX", "10", "k1", "v1", "k2", "v2"))
+	// MSETEX numkeys k1 v1 k2 v2
+	actual := testDB.Exec(nil, utils.ToCmdLine("MSETEX", "2", "k1", "v1", "k2", "v2"))
 	if string(actual.ToBytes()) != "+OK\r\n" {
 		t.Fatal("MSETEX should return OK")
 	}
@@ -879,10 +884,19 @@ func TestMSetEX(t *testing.T) {
 	if string(actual.ToBytes()) != "$2\r\nv2\r\n" {
 		t.Fatal("MSETEX k2 should be v2")
 	}
+}
+
+func TestMSetEXWithTTL(t *testing.T) {
+	testDB.Flush()
+	// MSETEX numkeys k1 v1 k2 v2 EX 10
+	actual := testDB.Exec(nil, utils.ToCmdLine("MSETEX", "2", "k1", "v1", "k2", "v2", "EX", "10"))
+	if string(actual.ToBytes()) != "+OK\r\n" {
+		t.Fatal("MSETEX with EX should return OK")
+	}
 
 	// Verify TTL exists
 	actual = testDB.Exec(nil, utils.ToCmdLine("TTL", "k1"))
 	if actual.(*protocol.IntReply).Code <= 0 {
-		t.Fatal("MSETEX should set TTL")
+		t.Fatal("MSETEX with EX should set TTL")
 	}
 }

@@ -95,15 +95,12 @@ func (r *Robj) Value() interface{} {
 	return r.Ptr
 }
 
-// MakeStringObject creates a string object with the appropriate encoding
+// MakeStringObject creates a string object with the appropriate encoding.
+// For small integers [0, 10000), returns a shared singleton to reduce allocations.
 func MakeStringObject(b []byte) *Robj {
 	// Try to parse as int
 	if v, ok := isInt(string(b)); ok {
-		return &Robj{
-			Type:     TypeString,
-			Encoding: EncInt,
-			Ptr:      v,
-		}
+		return SharedInt(v)
 	}
 
 	// Check if it's short enough for embstr (<=44 bytes)
