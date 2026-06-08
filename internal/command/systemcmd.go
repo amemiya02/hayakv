@@ -85,22 +85,22 @@ func Info(db *Server, args [][]byte) redis.Reply {
 func Auth(c redis.Connection, args [][]byte) redis.Reply {
 	if len(args) == 1 {
 		// Legacy 1-arg AUTH: authenticate as "default" user
-		if config.Properties.RequirePass == "" && globalACL == nil {
+		if config.Properties.RequirePass == "" {
+			// No password configured at all — reject AUTH
 			return protocol.MakeErrReply("ERR Client sent AUTH, but no password is set")
 		}
 		passwd := string(args[0])
 		c.SetPassword(passwd)
-		if globalACL != nil {
-			u, err := globalACL.Authenticate("default", passwd)
-			if err != nil {
-				return protocol.MakeErrReply(err.Error())
-			}
-			c.SetUser(u)
-			return &protocol.OkReply{}
-		}
-		// Fallback to legacy single-password check
+		// Legacy single-password check (overrides ACL nopass)
 		if config.Properties.RequirePass != passwd {
 			return protocol.MakeErrReply("ERR invalid password")
+		}
+		// Wire user through ACL if available
+		if globalACL != nil {
+			u, _ := globalACL.GetUser("default")
+			if u != nil {
+				c.SetUser(u)
+			}
 		}
 		return &protocol.OkReply{}
 	}

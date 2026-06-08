@@ -477,7 +477,7 @@ func (h *HLL) Count() uint64 {
 	z += m * hllSigma(float64(reghisto[0])/m)
 
 	// E = alpha_m * m^2 / z, where alpha_m = 1/(2*ln(2)) ≈ 0.72134752
-	E := 0.72134752 * m * m / z
+	E := 0.72134752044448170367996 * m * m / z
 
 	est := uint64(E + 0.5)
 
