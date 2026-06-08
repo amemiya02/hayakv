@@ -64,7 +64,7 @@ var diffExclusions = map[string]string{
 
 func TestCorpusMentionsOrExcludesEveryRegisteredCommand(t *testing.T) {
 	covered := map[string]bool{}
-	corpora := []func() []Scenario{baseCorpus, txnCorpus, scanCorpus, geoCorpus, variantCorpus, evalCorpus, hashTTLCorpus, keyspaceCorpus, censusCorpus}
+	corpora := []func() []Scenario{baseCorpus, txnCorpus, scanCorpus, geoCorpus, variantCorpus, evalCorpus, hashTTLCorpus, keyspaceCorpus, censusCorpus, semantics8xCorpus}
 	for _, corpus := range corpora {
 		for _, scenario := range corpus() {
 			for _, cmd := range scenario.Commands {

@@ -46,8 +46,8 @@ const (
 	encLZF   = 3
 )
 
-// Version is the RDB format hayakv writes.
-const Version = 11
+// Version is the RDB format hayakv writes (aligned with Redis 8.x).
+const Version = 12
 
 // EntryType mirrors the value type byte for decoded entries.
 type EntryType byte

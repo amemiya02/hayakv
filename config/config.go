@@ -143,16 +143,17 @@ func init() {
 
 	// default config
 	Properties = &ServerProperties{
-		Bind:           "127.0.0.1",
-		Port:           6379,
-		AppendOnly:     false,
-		RunID:          utils.RandString(40),
-		NetBackend:     "goroutine",
-		EngineBackend:  "shardmap",
-		ProtoMax:       "resp2",
-		RdbImpl:        "library",
-		AppendFilename: "appendonly.aof",
-		AppendDirname:  "appendonlydir",
+		Bind:              "127.0.0.1",
+		Port:              6379,
+		AppendOnly:        false,
+		AofUseRdbPreamble: true, // Redis 7+ default is "yes"
+		RunID:             utils.RandString(40),
+		NetBackend:        "goroutine",
+		EngineBackend:     "shardmap",
+		ProtoMax:          "resp2",
+		RdbImpl:           "library",
+		AppendFilename:    "appendonly.aof",
+		AppendDirname:     "appendonlydir",
 
 		ReplBacklogSize:  1024 * 1024, // 1MB, Redis default
 		ReplDisklessSync: false,

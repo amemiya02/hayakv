@@ -47,12 +47,12 @@ func TestRewriteMultiPart(t *testing.T) {
 	if len(incrs) != 1 || incrs[0].Seq != 2 {
 		t.Fatalf("new incr seq != 2: %+v", incrs)
 	}
-	// new base file exists and is a real RDB (starts with REDIS0011)
+	// new base file exists and is a real RDB (starts with REDIS0012)
 	data, err := os.ReadFile(mp.pathOf(base.FileName))
 	if err != nil {
 		t.Fatalf("read new base: %v", err)
 	}
-	if string(data[:9]) != "REDIS0011" {
+	if string(data[:9]) != "REDIS0012" {
 		t.Fatalf("new base not RDB: %q", data[:9])
 	}
 	// new incr file exists and is empty (fresh)

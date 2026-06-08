@@ -7,7 +7,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/datastruct/stream"
 )
 
-// Encoder writes an RDB v11 stream and finalizes a CRC64 trailer.
+// Encoder writes an RDB v12 stream and finalizes a CRC64 trailer.
 type Encoder struct {
 	w *writer
 }
@@ -15,9 +15,9 @@ type Encoder struct {
 // NewEncoder returns an Encoder writing to w.
 func NewEncoder(w io.Writer) *Encoder { return &Encoder{w: newWriter(w)} }
 
-// WriteHeader writes the "REDIS0011" magic.
+// WriteHeader writes the "REDIS0012" magic (RDB version 12, matching Redis 8.x).
 func (e *Encoder) WriteHeader() error {
-	return e.w.writeBytes([]byte("REDIS0011"))
+	return e.w.writeBytes([]byte("REDIS0012"))
 }
 
 // WriteAux writes a 0xFA auxiliary key/value field.
