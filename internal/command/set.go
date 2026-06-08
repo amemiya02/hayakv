@@ -473,11 +473,13 @@ func execSScan(db *DB, args [][]byte) redis.Reply {
 
 func init() {
 	registerCommand("SAdd", execSAdd, writeFirstKey, undoSetChange, -3, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifySet, "sadd")
 	registerCommand("SIsMember", execSIsMember, readFirstKey, nil, 3, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("SRem", execSRem, writeFirstKey, undoSetChange, -3, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifySet, "srem")
 	registerCommand("SPop", execSPop, writeFirstKey, undoSetChange, -2, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagRandom, redisFlagFast}, 1, 1, 1)
 	registerCommand("SCard", execSCard, readFirstKey, nil, 2, flagReadOnly).

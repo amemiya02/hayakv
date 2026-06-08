@@ -260,6 +260,7 @@ func (server *Server) evictOneKeyWithSize() (int64, bool) {
 		db.Remove(best)
 		db.addAof(toExpireDelAof(best))
 		db.RWUnLocks([]string{best}, nil)
+		server.notifyKeyspaceEvent(i, notifyEvicted, "evicted", best)
 		return freed, true
 	}
 	return 0, false

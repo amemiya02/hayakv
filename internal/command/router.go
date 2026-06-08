@@ -23,10 +23,12 @@ type command struct {
 }
 
 type commandExtra struct {
-	signs    []string
-	firstKey int
-	lastKey  int
-	keyStep  int
+	signs        []string
+	firstKey     int
+	lastKey      int
+	keyStep      int
+	notifyClass  int
+	notifyEvent  string
 }
 
 const flagWrite = 0
@@ -93,11 +95,21 @@ func (cmd *command) toDescReply() redis.Reply {
 	return protocol.MakeMultiRawReply(args)
 }
 
-func (cmd *command) attachCommandExtra(signs []string, firstKey int, lastKey int, keyStep int) {
+func (cmd *command) attachCommandExtra(signs []string, firstKey int, lastKey int, keyStep int) *command {
 	cmd.extra = &commandExtra{
 		signs:    signs,
 		firstKey: firstKey,
 		lastKey:  lastKey,
 		keyStep:  keyStep,
 	}
+	return cmd
+}
+
+func (cmd *command) attachNotify(class int, event string) *command {
+	if cmd.extra == nil {
+		cmd.extra = &commandExtra{}
+	}
+	cmd.extra.notifyClass = class
+	cmd.extra.notifyEvent = event
+	return cmd
 }

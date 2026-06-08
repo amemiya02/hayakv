@@ -615,21 +615,25 @@ func toBytes(val interface{}) []byte {
 
 func init() {
 	registerCommand("HSet", execHSet, writeFirstKey, undoHSet, -4, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyHash, "hset")
 	registerCommand("HSetNX", execHSetNX, writeFirstKey, undoHSet, 4, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyHash, "hset")
 	registerCommand("HGet", execHGet, readFirstKey, nil, 3, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("HExists", execHExists, readFirstKey, nil, 3, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("HDel", execHDel, writeFirstKey, undoHDel, -3, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyHash, "hdel")
 	registerCommand("HLen", execHLen, readFirstKey, nil, 2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("HStrlen", execHStrlen, readFirstKey, nil, 3, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("HMSet", execHMSet, writeFirstKey, undoHMSet, -4, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyHash, "hset")
 	registerCommand("HMGet", execHMGet, readFirstKey, nil, -3, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("HKeys", execHKeys, readFirstKey, nil, 2, flagReadOnly).
@@ -639,9 +643,11 @@ func init() {
 	registerCommand("HGetAll", execHGetAll, readFirstKey, nil, 2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagRandom}, 1, 1, 1)
 	registerCommand("HIncrBy", execHIncrBy, writeFirstKey, undoHIncr, 4, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyHash, "hincrby")
 	registerCommand("HIncrByFloat", execHIncrByFloat, writeFirstKey, undoHIncr, 4, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyHash, "hincrbyfloat")
 	registerCommand("HRandField", execHRandField, readFirstKey, nil, -2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagRandom, redisFlagReadonly}, 1, 1, 1)
 	registerCommand("HScan", execHScan, readFirstKey, nil, -2, flagReadOnly).

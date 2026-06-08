@@ -3,6 +3,8 @@ package connection
 import (
 	"io"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // FakeConn implements redis.Connection for test. It behaves like an
@@ -20,6 +22,8 @@ type FakeConn struct {
 
 func NewFakeConn() *FakeConn {
 	c := &FakeConn{}
+	c.id = atomic.AddUint64(&nextClientID, 1)
+	c.createdAt = time.Now()
 	return c
 }
 

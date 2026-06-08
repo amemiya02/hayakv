@@ -884,11 +884,13 @@ func execZScan(db *DB, args [][]byte) redis.Reply {
 
 func init() {
 	registerCommand("ZAdd", execZAdd, writeFirstKey, undoZAdd, -4, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyZset, "zadd")
 	registerCommand("ZScore", execZScore, readFirstKey, nil, 3, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("ZIncrBy", execZIncrBy, writeFirstKey, undoZIncr, 4, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyZset, "zincrby")
 	registerCommand("ZRank", execZRank, readFirstKey, nil, 3, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("ZCount", execZCount, readFirstKey, nil, 4, flagReadOnly).
@@ -908,7 +910,8 @@ func init() {
 	registerCommand("ZPopMin", execZPopMin, writeFirstKey, rollbackFirstKey, -2, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
 	registerCommand("ZRem", execZRem, writeFirstKey, undoZRem, -3, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyZset, "zrem")
 	registerCommand("ZRemRangeByScore", execZRemRangeByScore, writeFirstKey, rollbackFirstKey, 4, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite}, 1, 1, 1)
 	registerCommand("ZRemRangeByRank", execZRemRangeByRank, writeFirstKey, rollbackFirstKey, 4, flagWrite).

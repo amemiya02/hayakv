@@ -193,6 +193,14 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 
 		result := cmd.executor(db, cmdLine[1:])
 
+		if cmd.extra != nil && cmd.extra.notifyClass != 0 {
+			if !protocol.IsErrorReply(result) {
+				for _, key := range write {
+					db.server.notifyKeyspaceEvent(db.index, cmd.extra.notifyClass, cmd.extra.notifyEvent, key)
+				}
+			}
+		}
+
 		if c != nil && c.Protocol() == redis.RESP3 && cmdName == "hgetall" {
 			if mbr, ok := result.(*protocol.MultiBulkReply); ok {
 				return convertMultiBulkToMapReply(mbr)
@@ -207,6 +215,14 @@ func (db *DB) execNormalCommand(c redis.Connection, cmdLine [][]byte) redis.Repl
 	db.addVersion(write...)
 
 	result := cmd.executor(db, cmdLine[1:])
+
+	if cmd.extra != nil && cmd.extra.notifyClass != 0 {
+		if !protocol.IsErrorReply(result) {
+			for _, key := range write {
+				db.server.notifyKeyspaceEvent(db.index, cmd.extra.notifyClass, cmd.extra.notifyEvent, key)
+			}
+		}
+	}
 
 	if c != nil && c.Protocol() == redis.RESP3 && cmdName == "hgetall" {
 		if mbr, ok := result.(*protocol.MultiBulkReply); ok {

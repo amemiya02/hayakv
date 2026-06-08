@@ -15,14 +15,15 @@ const (
 type Encoding int
 
 const (
-	EncInt       Encoding = iota // int64
-	EncEmbstr                    // embedded string (<=44 bytes)
-	EncRaw                       // raw string (>44 bytes)
-	EncListpack                  // listpack
-	EncQuicklist                 // quicklist
-	EncIntset                    // intset
-	EncHashtable                 // hashtable/dict
-	EncSkiplist                  // skiplist (for sorted set)
+	EncInt        Encoding = iota // int64
+	EncEmbstr                     // embedded string (<=44 bytes)
+	EncRaw                        // raw string (>44 bytes)
+	EncListpack                   // listpack
+	EncListpackEx                 // listpack with field expiries
+	EncQuicklist                  // quicklist
+	EncIntset                     // intset
+	EncHashtable                  // hashtable/dict
+	EncSkiplist                   // skiplist (for sorted set)
 )
 
 // Robj is a Redis object with type, encoding, and pointer to actual data

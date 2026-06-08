@@ -59,12 +59,63 @@ type Connection struct {
 	// onClose is called once inside the CAS guard, before fields are reset.
 	// Used by the handler to run AfterClientClose while fields are intact.
 	onClose func(*Connection)
+
+	// client identification
+	id         uint64    // unique client id (assigned atomically at creation)
+	clientName string    // CLIENT SETNAME
+	libName    string    // CLIENT SETINFO lib-name
+	libVer     string    // CLIENT SETINFO lib-ver
+	createdAt  time.Time // when the connection was established
+
+	// replyMode controls CLIENT REPLY OFF/ON/SKIP (0=normal, 1=off, 2=skip)
+	replyMode int
 }
 
 var connPool = sync.Pool{
 	New: func() interface{} {
 		return &Connection{}
 	},
+}
+
+// nextClientID is the atomic counter for assigning unique client IDs.
+var nextClientID uint64
+
+// clientRegistry tracks all live connections by their client ID.
+var (
+	clientRegistry   = make(map[uint64]*Connection)
+	clientRegistryMu sync.RWMutex
+)
+
+// RegisterClient adds a connection to the process-wide client registry.
+func RegisterClient(c *Connection) {
+	clientRegistryMu.Lock()
+	clientRegistry[c.id] = c
+	clientRegistryMu.Unlock()
+}
+
+// UnregisterClient removes a connection from the registry by ID.
+func UnregisterClient(id uint64) {
+	clientRegistryMu.Lock()
+	delete(clientRegistry, id)
+	clientRegistryMu.Unlock()
+}
+
+// AllClients returns a snapshot of all currently registered connections.
+func AllClients() []*Connection {
+	clientRegistryMu.RLock()
+	defer clientRegistryMu.RUnlock()
+	clients := make([]*Connection, 0, len(clientRegistry))
+	for _, c := range clientRegistry {
+		clients = append(clients, c)
+	}
+	return clients
+}
+
+// ClientByID looks up a connection by its client ID, returning nil if not found.
+func ClientByID(id uint64) *Connection {
+	clientRegistryMu.RLock()
+	defer clientRegistryMu.RUnlock()
+	return clientRegistry[id]
 }
 
 // OnClose registers a callback that runs once inside Close()'s CAS guard,
@@ -85,6 +136,7 @@ func (c *Connection) Close() error {
 	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
 		return nil
 	}
+	UnregisterClient(c.id)
 	if c.onClose != nil {
 		c.onClose(c)
 	}
@@ -99,6 +151,10 @@ func (c *Connection) Close() error {
 	c.watching = nil
 	c.txErrors = nil
 	c.selectedDB = 0
+	c.clientName = ""
+	c.libName = ""
+	c.libVer = ""
+	c.replyMode = 0
 	connPool.Put(c)
 	return nil
 }
@@ -117,6 +173,13 @@ func NewConn(conn net.Conn) *Connection {
 	c.onClose = nil // clear stale callback from previous occupant
 	c.flags = 0     // Close() never clears flags (inherited godis gap)
 	c.protocol = redis.RESP2
+	c.id = atomic.AddUint64(&nextClientID, 1)
+	c.createdAt = time.Now()
+	c.clientName = ""
+	c.libName = ""
+	c.libVer = ""
+	c.replyMode = 0
+	RegisterClient(c)
 	return c
 }
 
@@ -320,3 +383,33 @@ func (c *Connection) SetMaster() {
 func (c *Connection) IsMaster() bool {
 	return c.flags&flagMaster > 0
 }
+
+// ClientID returns the unique client ID assigned at connection creation.
+func (c *Connection) ClientID() uint64 { return c.id }
+
+// ClientName returns the name set by CLIENT SETNAME.
+func (c *Connection) ClientName() string { return c.clientName }
+
+// SetClientName sets the client name (CLIENT SETNAME).
+func (c *Connection) SetClientName(name string) { c.clientName = name }
+
+// LibName returns the library name set by CLIENT SETINFO lib-name.
+func (c *Connection) LibName() string { return c.libName }
+
+// SetLibName sets the library name (CLIENT SETINFO lib-name).
+func (c *Connection) SetLibName(name string) { c.libName = name }
+
+// LibVer returns the library version set by CLIENT SETINFO lib-ver.
+func (c *Connection) LibVer() string { return c.libVer }
+
+// SetLibVer sets the library version (CLIENT SETINFO lib-ver).
+func (c *Connection) SetLibVer(ver string) { c.libVer = ver }
+
+// CreatedAt returns when the connection was established.
+func (c *Connection) CreatedAt() time.Time { return c.createdAt }
+
+// ReplyMode returns the CLIENT REPLY mode (0=normal, 1=off, 2=skip).
+func (c *Connection) ReplyMode() int { return c.replyMode }
+
+// SetReplyMode sets the CLIENT REPLY mode.
+func (c *Connection) SetReplyMode(mode int) { c.replyMode = mode }

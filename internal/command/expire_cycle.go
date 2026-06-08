@@ -80,6 +80,9 @@ func (db *DB) expireIfNeeded(key string) bool {
 	}
 	db.Remove(key)
 	db.addAof(toExpireDelAof(key))
+	if db.server != nil {
+		db.server.notifyKeyspaceEvent(db.index, notifyExpired, "expired", key)
+	}
 	return true
 }
 

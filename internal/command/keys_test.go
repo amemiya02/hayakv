@@ -314,6 +314,51 @@ func TestCopy(t *testing.T) {
 	asserts.AssertIntReplyGreaterThan(t, result, 0)
 }
 
+func TestExpireOptions(t *testing.T) {
+	testDB.Flush()
+	key := utils.RandString(10)
+	value := utils.RandString(10)
+	testDB.Exec(nil, utils.ToCmdLine("SET", key, value))
+
+	// EXPIRE NX — first time should succeed (no existing TTL)
+	result := testDB.Exec(nil, utils.ToCmdLine("EXPIRE", key, "100", "NX"))
+	asserts.AssertIntReply(t, result, 1)
+
+	// EXPIRE NX — second time should fail (TTL already set)
+	result = testDB.Exec(nil, utils.ToCmdLine("EXPIRE", key, "200", "NX"))
+	asserts.AssertIntReply(t, result, 0)
+
+	// EXPIRE GT — larger TTL should succeed
+	result = testDB.Exec(nil, utils.ToCmdLine("EXPIRE", key, "300", "GT"))
+	asserts.AssertIntReply(t, result, 1)
+
+	// EXPIRE GT — smaller TTL should fail
+	result = testDB.Exec(nil, utils.ToCmdLine("EXPIRE", key, "50", "GT"))
+	asserts.AssertIntReply(t, result, 0)
+
+	// EXPIRE LT — smaller TTL should succeed
+	result = testDB.Exec(nil, utils.ToCmdLine("EXPIRE", key, "10", "LT"))
+	asserts.AssertIntReply(t, result, 1)
+
+	// EXPIRE XX — with existing TTL should succeed
+	result = testDB.Exec(nil, utils.ToCmdLine("EXPIRE", key, "50", "XX"))
+	asserts.AssertIntReply(t, result, 1)
+
+	// Remove TTL, then EXPIRE XX should fail
+	testDB.Exec(nil, utils.ToCmdLine("PERSIST", key))
+	result = testDB.Exec(nil, utils.ToCmdLine("EXPIRE", key, "50", "XX"))
+	asserts.AssertIntReply(t, result, 0)
+
+	// EXPIRE LT on key with no TTL should succeed (any TTL < infinity)
+	result = testDB.Exec(nil, utils.ToCmdLine("EXPIRE", key, "50", "LT"))
+	asserts.AssertIntReply(t, result, 1)
+
+	// EXPIRE GT on key with no TTL should fail (TTL can never be > infinity)
+	testDB.Exec(nil, utils.ToCmdLine("PERSIST", key))
+	result = testDB.Exec(nil, utils.ToCmdLine("EXPIRE", key, "50", "GT"))
+	asserts.AssertIntReply(t, result, 0)
+}
+
 func TestScan(t *testing.T) {
 	testDB.Flush()
 	for i := 0; i < 3; i++ {

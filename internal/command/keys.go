@@ -158,6 +158,61 @@ func execRenameNx(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeIntReply(1)
 }
 
+// expire option constants
+const (
+	expireOptionNone = iota
+	expireOptionNX
+	expireOptionXX
+	expireOptionGT
+	expireOptionLT
+)
+
+func parseExpireOption(args [][]byte) (int, [][]byte) {
+	if len(args) == 0 {
+		return expireOptionNone, args
+	}
+	opt := strings.ToUpper(string(args[0]))
+	switch opt {
+	case "NX":
+		return expireOptionNX, args[1:]
+	case "XX":
+		return expireOptionXX, args[1:]
+	case "GT":
+		return expireOptionGT, args[1:]
+	case "LT":
+		return expireOptionLT, args[1:]
+	default:
+		return expireOptionNone, args
+	}
+}
+
+// checkExpireOption returns true if the expire should proceed, false if it should return 0.
+func checkExpireOption(db *DB, key string, option int, expireAt time.Time) bool {
+	if option == expireOptionNone {
+		return true
+	}
+	raw, hasTTL := db.ttlMap.Get(key)
+	switch option {
+	case expireOptionNX:
+		return !hasTTL
+	case expireOptionXX:
+		return hasTTL
+	case expireOptionGT:
+		if !hasTTL {
+			return false
+		}
+		expireTime := raw.(time.Time)
+		return expireAt.After(expireTime)
+	case expireOptionLT:
+		if !hasTTL {
+			return true
+		}
+		expireTime := raw.(time.Time)
+		return expireAt.Before(expireTime)
+	}
+	return true
+}
+
 // execExpire sets a key's time to live in seconds
 func execExpire(db *DB, args [][]byte) redis.Reply {
 	key := string(args[0])
@@ -174,6 +229,12 @@ func execExpire(db *DB, args [][]byte) redis.Reply {
 	}
 
 	expireAt := time.Now().Add(ttl)
+
+	option, _ := parseExpireOption(args[2:])
+	if !checkExpireOption(db, key, option, expireAt) {
+		return protocol.MakeIntReply(0)
+	}
+
 	db.Expire(key, expireAt)
 	db.addAof(aof.MakeExpireCmd(key, expireAt).Args)
 	return protocol.MakeIntReply(1)
@@ -191,6 +252,11 @@ func execExpireAt(db *DB, args [][]byte) redis.Reply {
 
 	_, exists := db.GetEntity(key)
 	if !exists {
+		return protocol.MakeIntReply(0)
+	}
+
+	option, _ := parseExpireOption(args[2:])
+	if !checkExpireOption(db, key, option, expireAt) {
 		return protocol.MakeIntReply(0)
 	}
 
@@ -232,6 +298,12 @@ func execPExpire(db *DB, args [][]byte) redis.Reply {
 	}
 
 	expireAt := time.Now().Add(ttl)
+
+	option, _ := parseExpireOption(args[2:])
+	if !checkExpireOption(db, key, option, expireAt) {
+		return protocol.MakeIntReply(0)
+	}
+
 	db.Expire(key, expireAt)
 	db.addAof(aof.MakeExpireCmd(key, expireAt).Args)
 	return protocol.MakeIntReply(1)
@@ -252,8 +324,12 @@ func execPExpireAt(db *DB, args [][]byte) redis.Reply {
 		return protocol.MakeIntReply(0)
 	}
 
-	db.Expire(key, expireAt)
+	option, _ := parseExpireOption(args[2:])
+	if !checkExpireOption(db, key, option, expireAt) {
+		return protocol.MakeIntReply(0)
+	}
 
+	db.Expire(key, expireAt)
 	db.addAof(aof.MakeExpireCmd(key, expireAt).Args)
 	return protocol.MakeIntReply(1)
 }
@@ -479,17 +555,22 @@ func execScan(db *DB, args [][]byte) redis.Reply {
 
 func init() {
 	registerCommand("Del", execDel, writeAllKeys, undoDel, -2, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite}, 1, -1, 1)
-	registerCommand("Expire", execExpire, writeFirstKey, undoExpire, 3, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
-	registerCommand("ExpireAt", execExpireAt, writeFirstKey, undoExpire, 3, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite}, 1, -1, 1).
+		attachNotify(notifyGeneric, "del")
+	registerCommand("Expire", execExpire, writeFirstKey, undoExpire, -3, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyGeneric, "expire")
+	registerCommand("ExpireAt", execExpireAt, writeFirstKey, undoExpire, -3, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyGeneric, "expire")
 	registerCommand("ExpireTime", execExpireTime, readFirstKey, nil, 2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
-	registerCommand("PExpire", execPExpire, writeFirstKey, undoExpire, 3, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
-	registerCommand("PExpireAt", execPExpireAt, writeFirstKey, undoExpire, 3, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
+	registerCommand("PExpire", execPExpire, writeFirstKey, undoExpire, -3, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyGeneric, "expire")
+	registerCommand("PExpireAt", execPExpireAt, writeFirstKey, undoExpire, -3, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyGeneric, "expire")
 	registerCommand("PExpireTime", execPExpireTime, readFirstKey, nil, 2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
 	registerCommand("TTL", execTTL, readFirstKey, nil, 2, flagReadOnly).
@@ -497,15 +578,18 @@ func init() {
 	registerCommand("PTTL", execPTTL, readFirstKey, nil, 2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagRandom, redisFlagFast}, 1, 1, 1)
 	registerCommand("Persist", execPersist, writeFirstKey, undoExpire, 2, flagWrite).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyGeneric, "persist")
 	registerCommand("Exists", execExists, readAllKeys, nil, -2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("Type", execType, readFirstKey, nil, 2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, 1, 1)
 	registerCommand("Rename", execRename, prepareRename, undoRename, 3, flagReadOnly).
-		attachCommandExtra([]string{redisFlagWrite}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite}, 1, 1, 1).
+		attachNotify(notifyGeneric, "rename")
 	registerCommand("RenameNx", execRenameNx, prepareRename, undoRename, 3, flagReadOnly).
-		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1)
+		attachCommandExtra([]string{redisFlagWrite, redisFlagFast}, 1, 1, 1).
+		attachNotify(notifyGeneric, "rename")
 	registerCommand("Keys", execKeys, noPrepare, nil, 2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagSortForScript}, 1, 1, 1)
 	registerCommand("Scan", execScan, noPrepare, nil, -2, flagReadOnly).

@@ -1,5 +1,7 @@
 package redis
 
+import "time"
+
 // RespVersion indicates which RESP protocol version to use for encoding.
 // Defined here (not in iface) to avoid an import cycle: iface/seams.go
 // imports this package, so this package must not import iface.
@@ -53,4 +55,18 @@ type Connection interface {
 	IsMaster() bool
 
 	Name() string
+
+	// client identification
+	ClientID() uint64
+	ClientName() string
+	SetClientName(string)
+	LibName() string
+	SetLibName(string)
+	LibVer() string
+	SetLibVer(string)
+	CreatedAt() time.Time
+
+	// reply mode for CLIENT REPLY OFF/ON/SKIP
+	ReplyMode() int
+	SetReplyMode(int)
 }
