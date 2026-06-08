@@ -10,15 +10,17 @@ import (
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
 
-// execConfig implements a minimal CONFIG GET/SET sufficient for the eviction/expiry differential
-// scenarios and for go-redis/redis-py to negotiate eviction settings.
-func execConfig(args [][]byte) redis.Reply {
-	if len(args) < 2 {
+// execConfig implements CONFIG GET/SET/REWRITE/RESETSTAT.
+func execConfig(s *Server, args [][]byte) redis.Reply {
+	if len(args) < 1 {
 		return protocol.MakeArgNumErrReply("config")
 	}
 	sub := strings.ToUpper(string(args[0]))
 	switch sub {
 	case "GET":
+		if len(args) < 2 {
+			return protocol.MakeArgNumErrReply("config|get")
+		}
 		param := strings.ToLower(string(args[1]))
 		pairs := configGet(param)
 		return protocol.MakeMultiBulkReply(pairs)
@@ -28,7 +30,15 @@ func execConfig(args [][]byte) redis.Reply {
 		}
 		param := strings.ToLower(string(args[1]))
 		value := string(args[2])
-		return configSet(param, value)
+		return s.configSet(param, value)
+	case "REWRITE":
+		return configRewrite()
+	case "RESETSTAT":
+		if s != nil {
+			s.cmdStats.reset()
+			s.slogLogger.Reset()
+		}
+		return protocol.MakeOkReply()
 	default:
 		return protocol.MakeErrReply("ERR Unknown CONFIG subcommand or wrong number of arguments for '" + sub + "'")
 	}
@@ -50,6 +60,15 @@ func configGet(param string) [][]byte {
 		"set-max-intset-entries":    func() string { return strconv.Itoa(config.Properties.SetMaxIntsetEntries) },
 		"zset-max-listpack-entries": func() string { return strconv.Itoa(config.Properties.ZSetMaxListpackEntries) },
 		"notify-keyspace-events":    func() string { return config.Properties.NotifyKeyspaceEvents },
+		"latency-monitor-threshold": func() string { return "0" },
+		"slowlog-log-slower-than":   func() string { return strconv.FormatInt(config.Properties.SlowLogSlowerThan, 10) },
+		"slowlog-max-len":           func() string { return strconv.Itoa(config.Properties.SlowLogMaxLen) },
+		"port":                      func() string { return strconv.Itoa(config.Properties.Port) },
+		"bind":                      func() string { return config.Properties.Bind },
+		"requirepass":               func() string { return config.Properties.RequirePass },
+		"maxclients":                func() string { return strconv.Itoa(config.Properties.MaxClients) },
+		"dbfilename":                func() string { return config.Properties.RDBFilename },
+		"dir":                       func() string { return config.Properties.Dir },
 	}
 
 	// Build the matching predicate. If param contains a wildcard character, use
@@ -81,7 +100,7 @@ func boolToYesNo(b bool) string {
 	return "no"
 }
 
-func configSet(param, value string) redis.Reply {
+func (s *Server) configSet(param, value string) redis.Reply {
 	switch param {
 	case "maxmemory":
 		n, err := config.ParseMemoryBytes(value)
@@ -120,6 +139,24 @@ func configSet(param, value string) redis.Reply {
 			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'notify-keyspace-events'")
 		}
 		config.Properties.NotifyKeyspaceEvents = value
+	case "slowlog-log-slower-than":
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'slowlog-log-slower-than'")
+		}
+		config.Properties.SlowLogSlowerThan = n
+		if s != nil && s.slogLogger != nil {
+			s.slogLogger.SetThreshold(n)
+		}
+	case "slowlog-max-len":
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET 'slowlog-max-len'")
+		}
+		config.Properties.SlowLogMaxLen = n
+		if s != nil && s.slogLogger != nil {
+			s.slogLogger.SetMaxLen(n)
+		}
 	default:
 		// Unknown-but-tolerated: Redis accepts many params we don't model.
 		return protocol.MakeOkReply()

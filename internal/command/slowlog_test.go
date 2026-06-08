@@ -3,6 +3,7 @@ package database
 import (
 	"github.com/amemiya02/hayakv/internal/lib/utils"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
+	"github.com/amemiya02/hayakv/internal/server/connection"
 	"strconv"
 	"strings"
 	"testing"
@@ -244,4 +245,33 @@ func TestSlowLogger_HandleSlowlogCommand(t *testing.T) {
 			t.Errorf("Expected error '%s', got '%s'", expectedErr, errReply.Error())
 		}
 	})
+}
+
+func TestSlowlogHelp(t *testing.T) {
+	s := NewStandaloneServer()
+	c := connection.NewFakeConn()
+	r := s.Exec(c, utils.ToCmdLine("SLOWLOG", "HELP"))
+	body := string(r.ToBytes())
+	if !strings.Contains(body, "GET") {
+		t.Fatalf("SLOWLOG HELP missing GET: %q", body)
+	}
+	if !strings.Contains(body, "LEN") {
+		t.Fatalf("SLOWLOG HELP missing LEN: %q", body)
+	}
+	if !strings.Contains(body, "RESET") {
+		t.Fatalf("SLOWLOG HELP missing RESET: %q", body)
+	}
+}
+
+func TestSlowlogLiveConfig(t *testing.T) {
+	s := NewStandaloneServer()
+	c := connection.NewFakeConn()
+	// Enable slowlog: set max-len and threshold
+	s.Exec(c, utils.ToCmdLine("CONFIG", "SET", "slowlog-max-len", "128"))
+	s.Exec(c, utils.ToCmdLine("CONFIG", "SET", "slowlog-log-slower-than", "0"))
+	s.Exec(c, utils.ToCmdLine("SET", "k", "v"))
+	r := s.Exec(c, utils.ToCmdLine("SLOWLOG", "LEN"))
+	if string(r.ToBytes()) == ":0\r\n" {
+		t.Fatal("slowlog should have entries after threshold 0")
+	}
 }

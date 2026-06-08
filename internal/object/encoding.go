@@ -32,9 +32,10 @@ func parseFloat(s string) (float64, error) {
 
 // Hash represents a hash object that can be encoded as listpack or hashtable
 type Hash struct {
-	listpack   *Listpack
-	hashtable  dict.Dict
-	isListpack bool
+	listpack    *Listpack
+	hashtable   dict.Dict
+	isListpack  bool
+	fieldExpire map[string]int64 // field -> absolute ms expiry timestamp
 }
 
 // NewHash creates a new hash object
@@ -231,6 +232,9 @@ func (h *Hash) IsListpack() bool {
 // CurrentEncoding returns the current encoding of the hash object.
 func (h *Hash) CurrentEncoding() Encoding {
 	if h.isListpack {
+		if len(h.fieldExpire) > 0 {
+			return EncListpackEx
+		}
 		return EncListpack
 	}
 	return EncHashtable

@@ -116,6 +116,40 @@ func (sl *SlowLogger) Reset() {
 	sl.nextID = 1
 }
 
+// SetThreshold updates the slowlog threshold at runtime.
+func (sl *SlowLogger) SetThreshold(threshold int64) {
+	sl.mu.Lock()
+	sl.threshold = threshold
+	sl.mu.Unlock()
+}
+
+// SetMaxLen updates the slowlog max entries at runtime.
+func (sl *SlowLogger) SetMaxLen(maxLen int) {
+	if maxLen <= 0 {
+		return
+	}
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	sl.maxEntries = maxLen
+	newEntries := make([]*SlowLogEntry, maxLen)
+	copyIdx := 0
+	for i := 0; i < sl.count && i < maxLen; i++ {
+		idx := (sl.nextIdx - sl.count + i + sl.maxEntries) % sl.maxEntries
+		if idx < 0 {
+			idx += sl.maxEntries
+		}
+		oldIdx := (sl.nextIdx - sl.count + i + len(sl.entries)) % len(sl.entries)
+		newEntries[copyIdx] = sl.entries[oldIdx]
+		copyIdx++
+	}
+	sl.entries = newEntries
+	if copyIdx > maxLen {
+		copyIdx = maxLen
+	}
+	sl.count = copyIdx
+	sl.nextIdx = copyIdx % maxLen
+}
+
 // HandleSlowlogCommand Process SLOWLOG command
 func (sl *SlowLogger) HandleSlowlogCommand(args [][]byte) redis.Reply {
 	argsLen := len(args)
@@ -145,6 +179,19 @@ func (sl *SlowLogger) HandleSlowlogCommand(args [][]byte) redis.Reply {
 	case "reset":
 		sl.Reset()
 		return protocol.MakeOkReply()
+	case "help":
+		return protocol.MakeMultiBulkReply([][]byte{
+			[]byte("SLOWLOG <subcommand> [<arg> [value] ...]"),
+			[]byte("SLOWLOG HELP"),
+			[]byte("    Show this help."),
+			[]byte("SLOWLOG GET [<count>]"),
+			[]byte("    Return top <count> entries from the slowlog (default 10)."),
+			[]byte("    Each entry is: (id, timestamp, time-in-microseconds, commands, client, client-name)"),
+			[]byte("SLOWLOG LEN"),
+			[]byte("    Return the length of the slowlog."),
+			[]byte("SLOWLOG RESET"),
+			[]byte("    Reset the slowlog."),
+		})
 	default:
 		return protocol.MakeErrReply("ERR Unknown subcommand or wrong number of arguments for  '" + subCmd + "'")
 	}

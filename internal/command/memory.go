@@ -1,6 +1,7 @@
 package database
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/amemiya02/hayakv/internal/datastruct/dict"
@@ -80,8 +81,7 @@ func valueSize(v interface{}) int64 {
 	}
 }
 
-// execMemory handles MEMORY USAGE key [SAMPLES n]. Other MEMORY subcommands are
-// not supported.
+// execMemory handles MEMORY USAGE, MEMORY STATS, and MEMORY DOCTOR.
 func execMemory(db *DB, args [][]byte) redis.Reply {
 	if len(args) < 1 {
 		return protocol.MakeArgNumErrReply("memory")
@@ -99,9 +99,101 @@ func execMemory(db *DB, args [][]byte) redis.Reply {
 		}
 		size := estimateEntitySize(key, entity)
 		return protocol.MakeIntReply(size)
+	case "STATS":
+		return execMemoryStats(db.server)
+	case "DOCTOR":
+		return execMemoryDoctor(db.server)
 	default:
 		return protocol.MakeErrReply("ERR Unknown MEMORY subcommand or wrong number of arguments for '" + sub + "'")
 	}
+}
+
+// execMemoryStats returns a flat array of alternating key-value pairs
+// describing server memory usage, similar to real Redis MEMORY STATS.
+func execMemoryStats(server *Server) redis.Reply {
+	if server == nil {
+		return protocol.MakeErrReply("ERR server not available")
+	}
+
+	totalAlloc := server.usedMemory()
+	peak := server.peakMemory
+
+	// Count total keys across all DBs.
+	var totalKeys int
+	for i := range server.dbSet {
+		db := server.mustSelectDB(i)
+		totalKeys += db.data.Len()
+	}
+
+	// Estimate bytes per key.
+	var bytesPerKey int64
+	if totalKeys > 0 {
+		bytesPerKey = totalAlloc / int64(totalKeys)
+	}
+
+	// Dataset percentage (simplified: 100% when any data exists).
+	var datasetPct float64
+	if totalAlloc > 0 {
+		datasetPct = 100.0
+	}
+
+	fields := []struct {
+		key string
+		val string
+	}{
+		{"peak.allocated", strconv.FormatInt(peak, 10)},
+		{"total.allocated", strconv.FormatInt(totalAlloc, 10)},
+		{"startup.allocated", "0"},
+		{"replication.backlog", "0"},
+		{"clients.slaves", "0"},
+		{"clients.normal", "0"},
+		{"cluster.links", "0"},
+		{"aof.buffer", "0"},
+		{"lua.caches", "0"},
+		{"functions.caches", "0"},
+		{"keys.count", strconv.Itoa(totalKeys)},
+		{"keys.bytes-per-key", strconv.FormatInt(bytesPerKey, 10)},
+		{"dataset.bytes", strconv.FormatInt(totalAlloc, 10)},
+		{"dataset.percentage", strconv.FormatFloat(datasetPct, 'f', 1, 64)},
+		{"allocator.resident", strconv.FormatInt(totalAlloc, 10)},
+		{"allocator.active", strconv.FormatInt(totalAlloc, 10)},
+		{"allocator.fragmentation.bytes", "0"},
+		{"allocator.fragmentation.ratio", "1.00"},
+	}
+
+	parts := make([]redis.Reply, 0, len(fields)*2)
+	for _, f := range fields {
+		parts = append(parts,
+			protocol.MakeBulkReply([]byte(f.key)),
+			protocol.MakeBulkReply([]byte(f.val)),
+		)
+	}
+	return protocol.MakeMultiRawReply(parts)
+}
+
+// execMemoryDoctor returns a short advisory string about memory health.
+func execMemoryDoctor(server *Server) redis.Reply {
+	if server == nil {
+		return protocol.MakeErrReply("ERR server not available")
+	}
+
+	totalAlloc := server.usedMemory()
+	var totalKeys int
+	for i := range server.dbSet {
+		db := server.mustSelectDB(i)
+		totalKeys += db.data.Len()
+	}
+
+	var advice string
+	if totalKeys == 0 {
+		advice = "Hi, I'm your memory advisor. No keys in the dataset, so memory usage is minimal. Everything looks healthy!"
+	} else if totalAlloc < 1024*1024 {
+		advice = "Hi, I'm your memory advisor. Memory usage is under 1MB with " + strconv.Itoa(totalKeys) + " keys. No issues detected."
+	} else {
+		advice = "Hi, I'm your memory advisor. Total allocated: " + strconv.FormatInt(totalAlloc, 10) +
+			" bytes across " + strconv.Itoa(totalKeys) + " keys. Fragmentation ratio looks normal."
+	}
+	return protocol.MakeBulkReply([]byte(advice))
 }
 
 func init() {

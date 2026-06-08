@@ -33,6 +33,14 @@ func execClient(server *Server, c redis.Connection, args [][]byte) redis.Reply {
 		return clientKill(args[1:])
 	case "reply":
 		return clientReply(c, args[1:])
+	case "tracking":
+		return execClientTracking(server, c, args[1:])
+	case "trackinginfo":
+		return clientTrackingInfo(c)
+	case "getredirect":
+		return clientGetRedirect(c)
+	case "caching":
+		return clientCaching(c, args[1:])
 	default:
 		return protocol.MakeErrReply("ERR unknown subcommand '" + string(args[0]) + "'")
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/amemiya02/hayakv/internal/proto/resp2/parser"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol/asserts"
+	"github.com/amemiya02/hayakv/internal/pubsub"
 	"github.com/amemiya02/hayakv/internal/server/connection"
 	rdb "github.com/hdt3213/rdb/parser"
 )
@@ -27,10 +28,15 @@ func mockServer() *Server {
 	for i := range server.dbSet {
 		singleDB := makeDB()
 		singleDB.index = i
+		singleDB.server = server
 		holder := &atomic.Value{}
 		holder.Store(singleDB)
 		server.dbSet[i] = holder
 	}
+	server.hub = pubsub.MakeHub()
+	server.cmdStats = newCmdStats()
+	server.latencyMon = newLatencyMonitor()
+	server.slogLogger = NewSlowLogger(128, 10000)
 	server.slaveStatus = initReplSlaveStatus()
 	server.initMasterStatus()
 	return server

@@ -65,6 +65,15 @@ type Server struct {
 
 	// scriptEngine provides EVAL/EVALSHA/SCRIPT support.
 	scriptEngine iface.ScriptEngine
+
+	// peakMemory tracks the high-water mark of usedMemory() for MEMORY STATS.
+	peakMemory int64
+
+	// cmdStats records per-command call count, latency, and error stats.
+	cmdStats *cmdStats
+
+	// latencyMon records latency events for LATENCY command.
+	latencyMon *latencyMonitor
 }
 
 // DisableCron prevents StartCron from launching a background goroutine.
@@ -109,6 +118,10 @@ func NewStandaloneServer() *Server {
 		server.dbSet[i] = holder
 	}
 	server.hub = pubsub.MakeHub()
+	// per-command stats (must be initialized before AOF replay calls Exec)
+	server.cmdStats = newCmdStats()
+	// latency monitor
+	server.latencyMon = newLatencyMonitor()
 	// record aof
 	validAof := false
 	if config.Properties.AppendOnly {
@@ -207,6 +220,11 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 		return server.slogLogger.HandleSlowlogCommand(cmdLine)
 	}
 
+	// latency
+	if cmdName == "latency" {
+		return execLatency(server, cmdLine[1:])
+	}
+
 	if cmdName == "dbsize" {
 		return DbSize(c, server)
 	}
@@ -222,7 +240,7 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 		return execCommand(cmdLine[1:])
 	}
 	if cmdName == "config" {
-		return execConfig(cmdLine[1:])
+		return execConfig(server, cmdLine[1:])
 	}
 	if cmdName == "client" {
 		return execClient(server, c, cmdLine[1:])
@@ -234,6 +252,10 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 	// reset
 	if cmdName == "reset" {
 		return execReset(server, c)
+	}
+	// latency
+	if cmdName == "latency" {
+		return execLatency(server, cmdLine[1:])
 	}
 
 	// read only slave
@@ -321,6 +343,19 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 	exec := selectedDB.Exec(c, cmdLine)
 	// Record slow query logs
 	server.slogLogger.Record(GodisExecCommandStartUnixTime, cmdLine, c.Name())
+	// Record command stats
+	usec := time.Since(GodisExecCommandStartUnixTime).Microseconds()
+	isErr := exec != nil && len(exec.ToBytes()) > 0 && exec.ToBytes()[0] == '-'
+	server.cmdStats.record(cmdName, usec, isErr)
+	if isErr {
+		server.cmdStats.recordError(errorPrefix(exec.ToBytes()))
+	}
+	// Record latency event if threshold is set
+	if config.Properties.LatencyMonitorThreshold > 0 && server.latencyMon != nil {
+		if usec/1000 >= int64(config.Properties.LatencyMonitorThreshold) {
+			server.latencyMon.record("command", usec/1000)
+		}
+	}
 	// Feed monitors
 	if c != nil {
 		feedMonitors(dbIndex, cmdLine, c.Name())
@@ -651,6 +686,9 @@ func (server *Server) usedMemory() int64 {
 			total += estimateEntitySize(key, entity)
 			return true
 		})
+	}
+	if total > server.peakMemory {
+		server.peakMemory = total
 	}
 	return total
 }

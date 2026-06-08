@@ -23,12 +23,12 @@ type command struct {
 }
 
 type commandExtra struct {
-	signs        []string
-	firstKey     int
-	lastKey      int
-	keyStep      int
-	notifyClass  int
-	notifyEvent  string
+	signs       []string
+	firstKey    int
+	lastKey     int
+	keyStep     int
+	notifyClass int
+	notifyEvent string
 }
 
 const flagWrite = 0

@@ -90,6 +90,9 @@ type ServerProperties struct {
 	// keyspace notifications
 	NotifyKeyspaceEvents string `cfg:"notify-keyspace-events"` // flags string e.g. "KEA", "Elg"; empty = disabled
 
+	// latency monitoring
+	LatencyMonitorThreshold int `cfg:"latency-monitor-threshold"` // ms; 0 = disabled
+
 	rawConfig map[string]string // populated by parse(); used by normalizeMemoryConfig
 }
 
@@ -158,6 +161,10 @@ func init() {
 		MaxmemoryPolicy:  "noeviction",
 		MaxmemorySamples: 5,
 		Hz:               10,
+
+		// slowlog defaults (Redis 8)
+		SlowLogSlowerThan: 10000, // 10ms
+		SlowLogMaxLen:     128,
 
 		ClusterConfigFile: "nodes.conf",
 	}

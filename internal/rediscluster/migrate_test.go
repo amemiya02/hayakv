@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/amemiya02/hayakv/internal/iface"
 	iredis "github.com/amemiya02/hayakv/internal/iface/redis"
@@ -115,3 +116,21 @@ func (connStub) IsSlave() bool                  { return false }
 func (connStub) SetMaster()                     {}
 func (connStub) IsMaster() bool                 { return false }
 func (connStub) Name() string                   { return "" }
+func (connStub) ClientID() uint64               { return 0 }
+func (connStub) ClientName() string             { return "" }
+func (connStub) SetClientName(string)           {}
+func (connStub) LibName() string                { return "" }
+func (connStub) SetLibName(string)              {}
+func (connStub) LibVer() string                 { return "" }
+func (connStub) SetLibVer(string)               {}
+func (connStub) CreatedAt() time.Time           { return time.Time{} }
+func (connStub) ReplyMode() int                 { return 0 }
+func (connStub) SetReplyMode(int)               {}
+func (connStub) IsTracking() bool               { return false }
+func (connStub) SetTracking(bool)               {}
+func (connStub) TrackingMode() int              { return 0 }
+func (connStub) SetTrackingMode(int)            {}
+func (connStub) NoLoop() bool                   { return false }
+func (connStub) SetNoLoop(bool)                 {}
+func (connStub) RedirectID() uint64             { return 0 }
+func (connStub) SetRedirectID(uint64)           {}

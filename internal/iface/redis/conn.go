@@ -69,4 +69,14 @@ type Connection interface {
 	// reply mode for CLIENT REPLY OFF/ON/SKIP
 	ReplyMode() int
 	SetReplyMode(int)
+
+	// tracking state (CLIENT TRACKING)
+	IsTracking() bool
+	SetTracking(bool)
+	TrackingMode() int
+	SetTrackingMode(int)
+	NoLoop() bool
+	SetNoLoop(bool)
+	RedirectID() uint64
+	SetRedirectID(uint64)
 }

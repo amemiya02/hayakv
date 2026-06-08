@@ -69,6 +69,12 @@ type Connection struct {
 
 	// replyMode controls CLIENT REPLY OFF/ON/SKIP (0=normal, 1=off, 2=skip)
 	replyMode int
+
+	// tracking state (CLIENT TRACKING)
+	tracking     bool
+	trackingMode int    // 0=default, 1=optin, 2=optout
+	noLoop       bool   // NOLOOP flag
+	redirectID   uint64 // redirect target client ID (0 = self)
 }
 
 var connPool = sync.Pool{
@@ -416,3 +422,27 @@ func (c *Connection) ReplyMode() int { return c.replyMode }
 
 // SetReplyMode sets the CLIENT REPLY mode.
 func (c *Connection) SetReplyMode(mode int) { c.replyMode = mode }
+
+// IsTracking returns whether CLIENT TRACKING is enabled.
+func (c *Connection) IsTracking() bool { return c.tracking }
+
+// SetTracking enables or disables CLIENT TRACKING.
+func (c *Connection) SetTracking(v bool) { c.tracking = v }
+
+// TrackingMode returns the tracking mode (0=default, 1=optin, 2=optout).
+func (c *Connection) TrackingMode() int { return c.trackingMode }
+
+// SetTrackingMode sets the tracking mode.
+func (c *Connection) SetTrackingMode(mode int) { c.trackingMode = mode }
+
+// NoLoop returns the NOLOOP flag.
+func (c *Connection) NoLoop() bool { return c.noLoop }
+
+// SetNoLoop sets the NOLOOP flag.
+func (c *Connection) SetNoLoop(v bool) { c.noLoop = v }
+
+// RedirectID returns the redirect target client ID.
+func (c *Connection) RedirectID() uint64 { return c.redirectID }
+
+// SetRedirectID sets the redirect target client ID.
+func (c *Connection) SetRedirectID(id uint64) { c.redirectID = id }

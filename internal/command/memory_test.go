@@ -1,10 +1,13 @@
 package database
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/amemiya02/hayakv/internal/datastruct/set"
 	"github.com/amemiya02/hayakv/internal/iface/database"
+	"github.com/amemiya02/hayakv/internal/lib/utils"
+	"github.com/amemiya02/hayakv/internal/server/connection"
 )
 
 func TestEstimateEntitySizeStableForFixedInput(t *testing.T) {
@@ -44,5 +47,29 @@ func TestUsedMemorySumsDBs(t *testing.T) {
 	after := s.usedMemory()
 	if after <= before {
 		t.Fatalf("usedMemory did not grow: before=%d after=%d", before, after)
+	}
+}
+
+func TestMemoryStats(t *testing.T) {
+	s := NewStandaloneServer()
+	defer s.Close()
+	conn := connection.NewFakeConn()
+	s.Exec(conn, utils.ToCmdLine("SET", "k", "v"))
+	r := s.Exec(conn, utils.ToCmdLine("MEMORY", "STATS"))
+	body := string(r.ToBytes())
+	for _, field := range []string{"keys.count", "dataset.bytes", "peak.allocated", "total.allocated"} {
+		if !strings.Contains(body, field) {
+			t.Fatalf("MEMORY STATS missing %s: %s", field, body)
+		}
+	}
+}
+
+func TestMemoryDoctor(t *testing.T) {
+	s := NewStandaloneServer()
+	defer s.Close()
+	conn := connection.NewFakeConn()
+	r := s.Exec(conn, utils.ToCmdLine("MEMORY", "DOCTOR"))
+	if len(r.ToBytes()) == 0 {
+		t.Fatal("MEMORY DOCTOR empty")
 	}
 }

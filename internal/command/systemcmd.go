@@ -50,6 +50,30 @@ func Info(db *Server, args [][]byte) redis.Reply {
 			return protocol.MakeBulkReply(GenGodisInfoString("cluster", db))
 		case "keyspace":
 			return protocol.MakeBulkReply(GenGodisInfoString("keyspace", db))
+		case "commandstats":
+			return protocol.MakeBulkReply([]byte(db.infoCommandstats()))
+		case "latencystats":
+			return protocol.MakeBulkReply([]byte(db.infoLatencystats()))
+		case "errorstats":
+			return protocol.MakeBulkReply([]byte(db.infoErrorstats()))
+		case "everything":
+			infoCommandList := [...]string{"server", "clients", "memory", "persistence", "replication", "cluster", "keyspace", "commandstats", "latencystats", "errorstats"}
+			var allSection []byte
+			for _, s := range infoCommandList {
+				if s == "commandstats" || s == "latencystats" || s == "errorstats" {
+					switch s {
+					case "commandstats":
+						allSection = append(allSection, db.infoCommandstats()...)
+					case "latencystats":
+						allSection = append(allSection, db.infoLatencystats()...)
+					case "errorstats":
+						allSection = append(allSection, db.infoErrorstats()...)
+					}
+				} else {
+					allSection = append(allSection, GenGodisInfoString(s, db)...)
+				}
+			}
+			return protocol.MakeBulkReply(allSection)
 		default:
 			return protocol.MakeErrReply("Invalid section for 'info' command")
 		}
