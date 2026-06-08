@@ -132,6 +132,10 @@ func execSet(db *DB, args [][]byte) redis.Reply {
 	value := args[1]
 	policy := upsertPolicy
 	ttl := unlimitedTTL
+	var ifeqValue string
+	var ifgtValue string
+	hasIfeq := false
+	hasIfgt := false
 
 	// parse options
 	if len(args) > 2 {
@@ -180,9 +184,51 @@ func execSet(db *DB, args [][]byte) redis.Reply {
 				}
 				ttl = ttlArg
 				i++ // skip next arg
+			} else if arg == "IFEQ" {
+				if i+1 >= len(args) {
+					return &protocol.SyntaxErrReply{}
+				}
+				ifeqValue = string(args[i+1])
+				hasIfeq = true
+				i++
+			} else if arg == "IFGT" {
+				if i+1 >= len(args) {
+					return &protocol.SyntaxErrReply{}
+				}
+				ifgtValue = string(args[i+1])
+				hasIfgt = true
+				i++
 			} else {
 				return &protocol.SyntaxErrReply{}
 			}
+		}
+	}
+
+	// Check IFEQ/IFGT conditions before writing
+	if hasIfeq {
+		existing, err := db.getAsString(key)
+		if err != nil {
+			return err
+		}
+		if existing == nil || string(existing) != ifeqValue {
+			return &protocol.NullBulkReply{}
+		}
+	}
+	if hasIfgt {
+		existing, err := db.getAsString(key)
+		if err != nil {
+			return err
+		}
+		if existing == nil {
+			return &protocol.NullBulkReply{}
+		}
+		existingVal, eErr := strconv.ParseFloat(string(existing), 64)
+		newVal, nErr := strconv.ParseFloat(ifgtValue, 64)
+		if eErr != nil || nErr != nil {
+			return protocol.MakeErrReply("ERR value is not a valid float")
+		}
+		if existingVal <= newVal {
+			return &protocol.NullBulkReply{}
 		}
 	}
 
@@ -841,6 +887,37 @@ func getRandomKey(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeBulkReply([]byte(k[0]))
 }
 
+// execMSetEX sets multiple key-value pairs with a shared TTL in seconds
+func execMSetEX(db *DB, args [][]byte) redis.Reply {
+	if len(args) < 3 || (len(args)-1)%2 != 0 {
+		return protocol.MakeSyntaxErrReply()
+	}
+	ttlArg, err := strconv.ParseInt(string(args[0]), 10, 64)
+	if err != nil {
+		return protocol.MakeErrReply("ERR value is not an integer or out of range")
+	}
+	if ttlArg <= 0 {
+		return protocol.MakeErrReply("ERR invalid expire time in msetex")
+	}
+	ttl := ttlArg * 1000 // convert to ms
+
+	kvArgs := args[1:]
+	size := len(kvArgs) / 2
+	keys := make([]string, size)
+	for i := 0; i < size; i++ {
+		keys[i] = string(kvArgs[2*i])
+		value := kvArgs[2*i+1]
+		db.PutEntity(keys[i], &database.DataEntity{Data: object.MakeStringObject(value)})
+	}
+
+	expireTime := time.Now().Add(time.Duration(ttl) * time.Millisecond)
+	for _, key := range keys {
+		db.Expire(key, expireTime)
+	}
+	db.addAof(utils.ToCmdLine3("msetex", args...))
+	return &protocol.OkReply{}
+}
+
 func init() {
 	registerCommand("Set", execSet, writeFirstKey, rollbackFirstKey, -3, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM}, 1, 1, 1).
@@ -860,6 +937,9 @@ func init() {
 	registerCommand("MGet", execMGet, prepareMGet, nil, -2, flagReadOnly).
 		attachCommandExtra([]string{redisFlagReadonly, redisFlagFast}, 1, -1, 1)
 	registerCommand("MSetNX", execMSetNX, prepareMSet, undoMSet, -3, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM}, 1, -1, 2).
+		attachNotify(notifyString, "set")
+	registerCommand("MSetEX", execMSetEX, prepareMSet, undoMSet, -4, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite, redisFlagDenyOOM}, 1, -1, 2).
 		attachNotify(notifyString, "set")
 	registerCommand("Get", execGet, readFirstKey, nil, 2, flagReadOnly).

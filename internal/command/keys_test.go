@@ -440,3 +440,22 @@ func TestScan(t *testing.T) {
 		return
 	}
 }
+
+func TestDelEx(t *testing.T) {
+	testDB.Flush()
+	testDB.Exec(nil, utils.ToCmdLine("MSET", "a", "1", "b", "2"))
+	actual := testDB.Exec(nil, utils.ToCmdLine("DELEX", "a", "b", "c"))
+	if string(actual.ToBytes()) != ":2\r\n" {
+		t.Fatal("DELEX should delete existing keys and return the count")
+	}
+
+	// Verify keys deleted
+	actual = testDB.Exec(nil, utils.ToCmdLine("GET", "a"))
+	if string(actual.ToBytes()) != "$-1\r\n" {
+		t.Fatal("DELEX should have deleted key a")
+	}
+	actual = testDB.Exec(nil, utils.ToCmdLine("GET", "b"))
+	if string(actual.ToBytes()) != "$-1\r\n" {
+		t.Fatal("DELEX should have deleted key b")
+	}
+}

@@ -31,6 +31,19 @@ func execDel(db *DB, args [][]byte) redis.Reply {
 	return protocol.MakeIntReply(int64(deleted))
 }
 
+// execDelEX removes keys and returns count (identical to DEL semantics)
+func execDelEX(db *DB, args [][]byte) redis.Reply {
+	keys := make([]string, len(args))
+	for i, v := range args {
+		keys[i] = string(v)
+	}
+	deleted := db.Removes(keys...)
+	if deleted > 0 {
+		db.addAof(utils.ToCmdLine3("delex", args...))
+	}
+	return protocol.MakeIntReply(int64(deleted))
+}
+
 func undoDel(db *DB, args [][]byte) []CmdLine {
 	keys := make([]string, len(args))
 	for i, v := range args {
@@ -595,6 +608,9 @@ func execScan(db *DB, args [][]byte) redis.Reply {
 
 func init() {
 	registerCommand("Del", execDel, writeAllKeys, undoDel, -2, flagWrite).
+		attachCommandExtra([]string{redisFlagWrite}, 1, -1, 1).
+		attachNotify(notifyGeneric, "del")
+	registerCommand("DelEX", execDelEX, writeAllKeys, undoDel, -2, flagWrite).
 		attachCommandExtra([]string{redisFlagWrite}, 1, -1, 1).
 		attachNotify(notifyGeneric, "del")
 	registerCommand("Expire", execExpire, writeFirstKey, undoExpire, -3, flagWrite).
