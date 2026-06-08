@@ -15,7 +15,7 @@
 #   tests/support/*                 -> test infrastructure, not test files
 #   tests/cluster/*                 -> Redis Cluster protocol tests (hayakv cluster is Raft-based)
 #   tests/unit/scripting.tcl        -> partial (FUNCTION/LDB/setresp(3) out of scope)
-#   tests/unit/introspection.tcl    -> CLIENT family M11; file pass M12
+#   tests/unit/introspection.tcl    -> pass (M12)
 #   tests/unit/networking.tcl       -> CLIENT/CONN info; M11
 
 files:
@@ -38,14 +38,18 @@ files:
   - {file: tests/unit/expire.tcl,          status: pass}
   - {file: tests/unit/geo.tcl,             status: excluded, reason: "geo commands deferred; precision audit needed"}
   - {file: tests/unit/hyperloglog.tcl,     status: excluded, reason: "HyperLogLog not yet implemented"}
-  - {file: tests/unit/introspection.tcl,   status: excluded, reason: "CLIENT family M11; file pass M12"}
+  - {file: tests/unit/info.tcl,            status: pass}
+  - {file: tests/unit/info-command.tcl,    status: pass}
+  - {file: tests/unit/introspection.tcl,   status: pass}
+  - {file: tests/unit/introspection-2.tcl, status: pass}
   - {file: tests/unit/iterator.tcl,        status: excluded, reason: "SCAN/cursor semantics differ; redisdb corpus covers"}
   - {file: tests/unit/keyspace.tcl,        status: pass}
+  - {file: tests/unit/latency-monitor.tcl, status: pass}
   - {file: tests/unit/lazyfree.tcl,        status: excluded, reason: "lazyfree async semantics not yet implemented"}
   - {file: tests/unit/maxmemory.tcl,       status: excluded, reason: "maxmemory eviction policy not yet implemented"}
   - {file: tests/unit/memefficiency.tcl,   status: excluded, reason: "allocator-specific; not byte-diffable"}
   - {file: tests/unit/networking.tcl,      status: excluded, reason: "CLIENT/CONN info; M11"}
-  - {file: tests/unit/notify.tcl,          status: excluded, reason: "keyspace notifications not yet implemented"}
+  - {file: tests/unit/notify.tcl,          status: pass}
   - {file: tests/unit/oom-score-adj.tcl,   status: excluded, reason: "OS-specific cgroup tweak"}
   - {file: tests/unit/other.tcl,           status: pass}
   - {file: tests/unit/pause.tcl,           status: excluded, reason: "CLIENT PAUSE not yet implemented"}
