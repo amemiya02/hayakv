@@ -3,6 +3,7 @@ package rediscluster
 import (
 	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	iredis "github.com/amemiya02/hayakv/internal/iface/redis"
@@ -108,4 +109,85 @@ func cmd(parts ...string) [][]byte {
 		out[i] = []byte(p)
 	}
 	return out
+}
+
+func TestClusterFailoverTakeover(t *testing.T) {
+	cc := newTestCommands(t)
+	masterID := genNodeID()
+	peer := newNode(masterID, "127.0.0.1", 7001)
+	peer.addSlot(0)
+	cc.state.mu.Lock()
+	cc.state.nodes[masterID] = peer
+	cc.state.slots[0] = peer
+	cc.state.self.flags &^= flagMaster
+	cc.state.self.flags |= flagSlave
+	cc.state.self.masterID = masterID
+	cc.state.mu.Unlock()
+
+	r := enc(t, cc.handle(cmd("CLUSTER", "FAILOVER", "TAKEOVER")))
+	if string(r) != "+OK\r\n" {
+		t.Fatalf("CLUSTER FAILOVER TAKEOVER = %q", r)
+	}
+
+	cc.state.mu.RLock()
+	isMaster := cc.state.self.flags&flagMaster != 0
+	ownsSlot0 := cc.state.slots[0] == cc.state.self
+	cc.state.mu.RUnlock()
+
+	if !isMaster {
+		t.Fatal("TAKEOVER should promote self to master")
+	}
+	if !ownsSlot0 {
+		t.Fatal("TAKEOVER should claim master's slots")
+	}
+}
+
+func TestClusterFailoverNotReplica(t *testing.T) {
+	cc := newTestCommands(t)
+	r := enc(t, cc.handle(cmd("CLUSTER", "FAILOVER")))
+	if !bytes.Contains(r, []byte("You should send CLUSTER FAILOVER to a replica")) {
+		t.Fatalf("FAILOVER on master should error, got %q", r)
+	}
+}
+
+func TestClusterBumpEpoch(t *testing.T) {
+	cc := newTestCommands(t)
+	r := enc(t, cc.handle(cmd("CLUSTER", "BUMPEPOCH")))
+	s := string(r)
+	if !strings.HasPrefix(s, "+BUMPED ") {
+		t.Fatalf("BUMPEPOCH = %q, want +BUMPED <epoch>", s)
+	}
+}
+
+func TestClusterLinks(t *testing.T) {
+	cc := newTestCommands(t)
+	peer := newNode(genNodeID(), "127.0.0.1", 7001)
+	cc.state.mu.Lock()
+	cc.state.nodes[peer.id] = peer
+	cc.state.mu.Unlock()
+
+	r := enc(t, cc.handle(cmd("CLUSTER", "LINKS")))
+	if r[0] != '*' {
+		t.Fatalf("LINKS should return array, got %q", r)
+	}
+}
+
+func TestClusterCountFailureReports(t *testing.T) {
+	cc := newTestCommands(t)
+	peer := newNode(genNodeID(), "127.0.0.1", 7001)
+	cc.state.mu.Lock()
+	cc.state.nodes[peer.id] = peer
+	cc.state.failureReports.addReport(peer.id, "reporter1")
+	cc.state.mu.Unlock()
+
+	r := enc(t, cc.handle(cmd("CLUSTER", "COUNT-FAILURE-REPORTS", peer.id)))
+	if string(r) != ":1\r\n" {
+		t.Fatalf("COUNT-FAILURE-REPORTS = %q, want :1", r)
+	}
+
+	// Unknown node
+	r = enc(t, cc.handle(cmd("CLUSTER", "COUNT-FAILURE-REPORTS", "nonexistent")))
+	if r[0] != '-' {
+		t.Fatalf("COUNT-FAILURE-REPORTS for unknown node should error, got %q", r)
+	}
 }

@@ -173,6 +173,10 @@ func PubSub(hub *Hub, args [][]byte) redis.Reply {
 		return pubSubNumSub(hub, args[1:])
 	case "numpat":
 		return pubSubNumPat(hub)
+	case "shardchannels":
+		return pubSubShardChannels(hub, args[1:])
+	case "shardnumsub":
+		return pubSubShardNumSub(hub, args[1:])
 	default:
 		return protocol.MakeErrReply("unknown subcommand '" + subCmd + "'. Try CHANNELS, NUMSUB, NUMPAT.")
 	}
@@ -219,4 +223,42 @@ func pubSubNumSub(hub *Hub, args [][]byte) redis.Reply {
 // pubSubNumPat implements PUBSUB NUMPAT
 func pubSubNumPat(hub *Hub) redis.Reply {
 	return protocol.MakeIntReply(int64(hub.patterns.Len()))
+}
+
+// pubSubShardChannels implements PUBSUB SHARDCHANNELS [pattern]
+func pubSubShardChannels(hub *Hub, args [][]byte) redis.Reply {
+	var pattern *wildcard.Pattern
+	if len(args) > 0 {
+		p, err := wildcard.CompilePattern(string(args[0]))
+		if err != nil {
+			return protocol.MakeErrReply("invalid pattern")
+		}
+		pattern = p
+	}
+
+	var result [][]byte
+	hub.shardSubs.ForEach(func(channel string, _ interface{}) bool {
+		if pattern == nil || pattern.IsMatch(channel) {
+			result = append(result, []byte(channel))
+		}
+		return true
+	})
+	return protocol.MakeMultiBulkReply(result)
+}
+
+// pubSubShardNumSub implements PUBSUB SHARDNUMSUB [channel ...]
+func pubSubShardNumSub(hub *Hub, args [][]byte) redis.Reply {
+	result := make([][]byte, 0, len(args)*2)
+	for _, b := range args {
+		channel := string(b)
+		result = append(result, []byte(channel))
+		raw, ok := hub.shardSubs.Get(channel)
+		if ok {
+			subscribers, _ := raw.(*list.LinkedList)
+			result = append(result, []byte(strconv.FormatInt(int64(subscribers.Len()), 10)))
+		} else {
+			result = append(result, []byte("0"))
+		}
+	}
+	return protocol.MakeMultiBulkReply(result)
 }

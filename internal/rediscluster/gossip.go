@@ -7,6 +7,8 @@ import (
 	"io"
 	"math/rand"
 	"net"
+
+	"github.com/amemiya02/hayakv/config"
 	"sync"
 	"time"
 )
@@ -19,6 +21,10 @@ const (
 	msgTypePong uint16 = 1
 	msgTypeMeet uint16 = 2
 	msgTypeFail uint16 = 3
+
+	msgTypeFailoverAuthRequest uint16 = 4 // replica requests vote from master
+	msgTypeFailoverAuthAck     uint16 = 5 // master grants vote to replica
+	msgTypePublishShard        uint16 = 6 // sharded pub/sub propagation
 
 	idLen = 40
 	// headerLen layout (fixed):
@@ -238,6 +244,21 @@ func (g *gossipBus) handleConn(conn net.Conn) {
 		pong := g.buildMessage(msgTypePong)
 		_, _ = conn.Write(pong)
 	}
+
+	// Handle FAIL message: mark the named node as definitively failed.
+	if h.msgType == msgTypeFail {
+		g.handleFailMessage(h)
+	}
+
+	// Handle failover auth request: a master decides whether to grant a vote.
+	if h.msgType == msgTypeFailoverAuthRequest {
+		g.handleAuthRequest(h)
+	}
+
+	// Handle failover auth ack: the requesting replica tallies a vote.
+	if h.msgType == msgTypeFailoverAuthAck {
+		g.handleAuthAck(h)
+	}
 }
 
 // mergeFromMessage updates local state with the sender's identity + slots and any
@@ -288,10 +309,24 @@ func (g *gossipBus) mergeFromMessage(h *clusterMsgHeader, entries []gossipEntry,
 		if e.id == "" || e.id == g.state.self.id {
 			continue
 		}
-		if _, ok := g.state.nodes[e.id]; !ok {
+		node, existed := g.state.nodes[e.id]
+		if !existed {
 			g.state.nodes[e.id] = &clusterNode{
 				id: e.id, ip: e.ip, port: int(e.port), cport: int(e.cport),
 				flags: e.flags, linkUp: true,
+			}
+			continue
+		}
+		// Update existing node with failure status from the sender's gossip.
+		if e.flags&uint32(flagFail) != 0 {
+			// FAIL is authoritative (majority agreed) — adopt it.
+			node.flags &^= flagPFail
+			node.flags |= flagFail
+		} else if e.flags&uint32(flagPFail) != 0 && node.flags&flagFail == 0 {
+			// PFAIL from this sender — record a failure report.
+			node.flags |= flagPFail
+			if g.state.failureReports != nil {
+				g.state.failureReports.addReport(e.id, h.senderID)
 			}
 		}
 	}
@@ -373,6 +408,12 @@ func (g *gossipBus) pingLoop() {
 			return
 		case <-ticker.C:
 			g.pingOnePeer()
+			// Check for timed-out peers (PFAIL detection)
+			if timeout := config.Properties.ClusterNodeTimeout; timeout > 0 {
+				g.state.markPFailIfTimedOut(int64(timeout))
+				// Check if we should trigger/check a failover election
+				g.state.checkFailoverTick(g)
+			}
 		}
 	}
 }
@@ -409,5 +450,98 @@ func (g *gossipBus) pingOnePeer() {
 			_, _ = io.ReadFull(conn, gossipBuf)
 		}
 		g.mergeFromMessage(h, decodeGossip(gossipBuf, int(h.gossipCount)), target.ip)
+	}
+}
+
+// handleFailMessage processes a FAIL message from a peer.
+// The sender (identified by h.senderID) is reporting that a node is FAIL.
+// In Redis cluster, FAIL messages carry the failed node's ID in the gossip
+// section. Any entry with flagFail set should be marked FAIL locally
+// (the sender has already confirmed quorum). This is how Redis propagates
+// FAIL status. The actual flag adoption happens in mergeFromMessage; this
+// hook exists so future work can trigger side effects (e.g. start failover).
+func (g *gossipBus) handleFailMessage(h *clusterMsgHeader) {
+	// Side-effect hook for FAIL propagation.
+	// The gossip entries are already processed by mergeFromMessage,
+	// which adopts FAIL flags from the sender's view.
+}
+
+// handleAuthRequest processes a FAILOVER_AUTH_REQUEST from a replica.
+// A master grants a vote iff:
+//   - reqEpoch >= currentEpoch
+//   - not yet voted this epoch (lastVoteEpoch < reqEpoch)
+//   - the requesting replica's master is FAIL
+//
+// On grant, send AUTH_ACK back and update lastVoteEpoch.
+func (g *gossipBus) handleAuthRequest(h *clusterMsgHeader) {
+	// This node must be a master to vote
+	g.state.mu.RLock()
+	isMaster := g.state.self.flags&flagMaster != 0
+	g.state.mu.RUnlock()
+
+	if !isMaster {
+		return
+	}
+
+	// The sender is a replica requesting a vote.
+	reqEpoch := h.currentEpoch
+	replicaID := h.senderID
+
+	// Find the sender's master — check our node table
+	g.state.mu.RLock()
+	replica := g.state.nodes[replicaID]
+	var masterID string
+	if replica != nil {
+		masterID = replica.masterID
+	}
+	g.state.mu.RUnlock()
+
+	if masterID == "" {
+		return
+	}
+
+	if g.state.grantVote(replicaID, masterID, reqEpoch) {
+		// Send AUTH_ACK back to the replica
+		g.broadcastMessage(msgTypeFailoverAuthAck)
+	}
+}
+
+// handleAuthAck processes a FAILOVER_AUTH_ACK from a master.
+// The requesting replica tallies votes; on majority it can proceed.
+func (g *gossipBus) handleAuthAck(h *clusterMsgHeader) {
+	// We're a replica and this is a vote from a master
+	g.state.mu.RLock()
+	isReplica := g.state.self.flags&flagSlave != 0
+	g.state.mu.RUnlock()
+
+	if !isReplica {
+		return
+	}
+
+	// Record the vote
+	_ = g.state.recordVote(h.senderID)
+	// If the election is won, claimOwnership will be called on the next
+	// checkFailoverTick from the pingLoop.
+}
+
+// broadcastMessage sends a message of the given type to all known peers.
+func (g *gossipBus) broadcastMessage(msgType uint16) {
+	g.state.mu.RLock()
+	var peers []*clusterNode
+	for _, n := range g.state.nodes {
+		if n.id != g.state.self.id && n.cport != 0 && n.linkUp {
+			peers = append(peers, n)
+		}
+	}
+	g.state.mu.RUnlock()
+
+	msg := g.buildMessage(msgType)
+	for _, p := range peers {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", p.ip, p.cport), time.Second)
+		if err != nil {
+			continue
+		}
+		_, _ = conn.Write(msg)
+		_ = conn.Close()
 	}
 }

@@ -327,6 +327,15 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 		return pubsub.PUnsubscribe(server.hub, c, cmdLine[1:])
 	} else if cmdName == "pubsub" {
 		return pubsub.PubSub(server.hub, cmdLine[1:])
+	} else if cmdName == "ssubscribe" {
+		if len(cmdLine) < 2 {
+			return protocol.MakeArgNumErrReply("ssubscribe")
+		}
+		return pubsub.SSubscribe(server.hub, c, cmdLine[1:])
+	} else if cmdName == "spublish" {
+		return pubsub.SPublish(server.hub, cmdLine[1:])
+	} else if cmdName == "sunsubscribe" {
+		return pubsub.SUnsubscribe(server.hub, c, cmdLine[1:])
 	} else if cmdName == "bgrewriteaof" {
 		if !config.Properties.AppendOnly {
 			return protocol.MakeErrReply("AppendOnly is false, you can't rewrite aof file")
@@ -371,6 +380,10 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 		return server.execPSync(c, cmdLine[1:])
 	} else if cmdName == "wait" {
 		return execWait(server, cmdLine[1:])
+	} else if cmdName == "waitaof" {
+		return execWaitAof(server, cmdLine[1:])
+	} else if cmdName == "failover" {
+		return execFailover(server, cmdLine[1:])
 	}
 	// todo: support multi database transaction
 
@@ -407,6 +420,7 @@ func (server *Server) Exec(c redis.Connection, cmdLine [][]byte) (result redis.R
 // AfterClientClose does some clean after client close connection
 func (server *Server) AfterClientClose(c redis.Connection) {
 	pubsub.UnsubscribeAll(server.hub, c)
+	pubsub.SUnsubscribeAll(server.hub, c)
 	unregisterMonitor(c.ClientID())
 }
 

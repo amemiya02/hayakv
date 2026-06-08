@@ -20,13 +20,16 @@ type migration struct {
 // It is read on every command (redirection hot path) and mutated by CLUSTER
 // admin commands and the gossip bus, so it carries its own RWMutex.
 type clusterState struct {
-	mu         sync.RWMutex
-	self       *clusterNode
-	nodes      map[string]*clusterNode // id -> node (includes self)
-	slots      [slotCount]*clusterNode // slot -> owning node (nil = unassigned)
-	migrations map[uint16]*migration   // slot -> migration state
-	epoch      uint64                  // current epoch
-	confPath   string
+	mu             sync.RWMutex
+	self           *clusterNode
+	nodes          map[string]*clusterNode // id -> node (includes self)
+	slots          [slotCount]*clusterNode // slot -> owning node (nil = unassigned)
+	migrations     map[uint16]*migration   // slot -> migration state
+	epoch          uint64                  // current epoch
+	failureReports *failureReports
+	lastVoteEpoch  uint64
+	failoverState  *failoverState
+	confPath       string
 }
 
 func newClusterState(ip string, port int, confPath string) *clusterState {
@@ -38,11 +41,12 @@ func newClusterState(ip string, port int, confPath string) *clusterState {
 	// slots (1 >= 1 blocks the merge).
 	startEpoch := uint64(rand.Int63n(1000)) + 1
 	return &clusterState{
-		self:       self,
-		nodes:      map[string]*clusterNode{self.id: self},
-		migrations: map[uint16]*migration{},
-		epoch:      startEpoch,
-		confPath:   confPath,
+		self:           self,
+		nodes:          map[string]*clusterNode{self.id: self},
+		migrations:     map[uint16]*migration{},
+		epoch:          startEpoch,
+		failureReports: newFailureReports(2), // default quorum; updated when cluster size is known
+		confPath:       confPath,
 	}
 }
 
@@ -170,6 +174,7 @@ func (s *clusterState) replicate(masterID string) bool {
 	s.self.masterID = masterID
 	return true
 }
+
 func (s *clusterState) snapshotNodes() []*clusterNode {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -190,7 +195,7 @@ func (s *clusterState) save() error {
 		b.WriteString(n.nodesLine())
 		b.WriteByte('\n')
 	}
-	fmt.Fprintf(&b, "vars currentEpoch %d lastVoteEpoch 0\n", s.epoch)
+	fmt.Fprintf(&b, "vars currentEpoch %d lastVoteEpoch %d\n", s.epoch, s.lastVoteEpoch)
 	tmp := s.confPath + ".tmp"
 	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
 		return err
@@ -225,6 +230,9 @@ func (s *clusterState) load() error {
 			for i := 0; i+1 < len(fields); i += 2 {
 				if fields[i] == "currentEpoch" {
 					s.epoch, _ = strconv.ParseUint(fields[i+1], 10, 64)
+				}
+				if fields[i] == "lastVoteEpoch" {
+					s.lastVoteEpoch, _ = strconv.ParseUint(fields[i+1], 10, 64)
 				}
 			}
 			continue

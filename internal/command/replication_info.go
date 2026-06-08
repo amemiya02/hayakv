@@ -55,6 +55,8 @@ func genReplicationInfo(server *Server) []byte {
 	}
 	masterReplId := server.masterStatus.replId
 	masterReplOffset := server.masterStatus.backlog.currentOffset
+	replid2 := server.masterStatus.replid2
+	secondReplOffset := server.masterStatus.secondReplOffset
 	server.masterStatus.mu.RUnlock()
 
 	b.WriteString(fmt.Sprintf("connected_slaves:%d\r\n", len(onlineSlaves)))
@@ -72,9 +74,9 @@ func genReplicationInfo(server *Server) []byte {
 	}
 	b.WriteString("master_failover_state:no-failover\r\n")
 	b.WriteString(fmt.Sprintf("master_replid:%s\r\n", masterReplId))
-	b.WriteString("master_replid2:0000000000000000000000000000000000000000\r\n")
+	b.WriteString(fmt.Sprintf("master_replid2:%s\r\n", replid2))
 	b.WriteString(fmt.Sprintf("master_repl_offset:%d\r\n", masterReplOffset))
-	b.WriteString("second_repl_offset:-1\r\n")
+	b.WriteString(fmt.Sprintf("second_repl_offset:%d\r\n", secondReplOffset))
 	b.WriteString("repl_backlog_active:1\r\n")
 	b.WriteString(fmt.Sprintf("repl_backlog_size:%d\r\n", server.masterStatus.backlog.limit))
 	b.WriteString(fmt.Sprintf("repl_backlog_first_byte_offset:%d\r\n", server.masterStatus.backlog.beginOffset))

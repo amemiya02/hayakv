@@ -120,6 +120,8 @@ type masterStatus struct {
 	mu                sync.RWMutex
 	sendMu            sync.Mutex // serializes masterSendUpdatesToSlave (cron / AOF listener / getack)
 	replId            string
+	replid2           string // set on role change (replica→master): the OLD master's replid
+	secondReplOffset  int64  // the offset at which replid2 was frozen (-1 = unused)
 	backlog           *replBacklog
 	slaveMap          map[redis.Connection]*slaveClient
 	waitSlaves        map[*slaveClient]struct{}
@@ -353,9 +355,26 @@ var cannotPartialSync = errors.New("cannot do partial sync")
 
 func (server *Server) masterTryPartialSyncWithSlave(slave *slaveClient, replId string, slaveOffset int64) error {
 	server.masterStatus.mu.RLock()
+	// PSYNC2: match against either the current replId or replid2 (the old
+	// master's replid after a failover), so that sub-replicas can partial-
+	// resync across the role change.
+	matchingReplid2 := false
 	if replId != server.masterStatus.replId {
-		server.masterStatus.mu.RUnlock()
-		return cannotPartialSync
+		if replId == server.masterStatus.replid2 && server.masterStatus.secondReplOffset > 0 {
+			matchingReplid2 = true
+		} else {
+			server.masterStatus.mu.RUnlock()
+			return cannotPartialSync
+		}
+	}
+	// When matching replid2, the valid offset range is [0, secondReplOffset].
+	// The backlog may contain data beyond that point (under the new replId),
+	// which is not applicable to a replid2-matching replica.
+	if matchingReplid2 {
+		if slaveOffset > server.masterStatus.secondReplOffset {
+			server.masterStatus.mu.RUnlock()
+			return cannotPartialSync
+		}
 	}
 	if !server.masterStatus.backlog.isValidOffset(slaveOffset) {
 		server.masterStatus.mu.RUnlock()
@@ -612,14 +631,16 @@ func (server *Server) initMasterStatus() {
 	backlog := &replBacklog{}
 	backlog.setLimit(config.Properties.ReplBacklogSize)
 	server.masterStatus = &masterStatus{
-		mu:           sync.RWMutex{},
-		replId:       utils.RandHexString(40),
-		backlog:      backlog,
-		slaveMap:     make(map[redis.Connection]*slaveClient),
-		waitSlaves:   make(map[*slaveClient]struct{}),
-		onlineSlaves: make(map[*slaveClient]struct{}),
-		bgSaveState:  bgSaveIdle,
-		rdbFilename:  "",
+		mu:               sync.RWMutex{},
+		replId:           utils.RandHexString(40),
+		replid2:          "0000000000000000000000000000000000000000",
+		secondReplOffset: -1,
+		backlog:          backlog,
+		slaveMap:         make(map[redis.Connection]*slaveClient),
+		waitSlaves:       make(map[*slaveClient]struct{}),
+		onlineSlaves:     make(map[*slaveClient]struct{}),
+		bgSaveState:      bgSaveIdle,
+		rdbFilename:      "",
 	}
 }
 

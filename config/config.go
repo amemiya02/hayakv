@@ -60,10 +60,11 @@ type ServerProperties struct {
 	ClusterSeed   string `cfg:"cluster-seed"`
 	// Cluster flavor selector: "redis" => real Redis Cluster (internal/rediscluster);
 	// anything else (incl. empty) => legacy raft proxy (internal/cluster) for back-compat.
-	ClusterMode       string `cfg:"cluster-mode"`
-	ClusterConfigFile string `cfg:"cluster-config-file"`
-	RaftListenAddr    string `cfg:"raft-listen-address"`
-	RaftAdvertiseAddr string `cfg:"raft-advertise-address"`
+	ClusterMode        string `cfg:"cluster-mode"`
+	ClusterConfigFile  string `cfg:"cluster-config-file"`
+	ClusterNodeTimeout int    `cfg:"cluster-node-timeout"` // ms; default 15000
+	RaftListenAddr     string `cfg:"raft-listen-address"`
+	RaftAdvertiseAddr  string `cfg:"raft-advertise-address"`
 	// If the node join the cluster as a replica of another node,
 	// set MasterInCluster as the RedisAdvertiseAddr of it's master node
 	MasterInCluster string `cfg:"master-in-cluster"`
@@ -176,7 +177,8 @@ func init() {
 		SlowLogSlowerThan: 10000, // 10ms
 		SlowLogMaxLen:     128,
 
-		ClusterConfigFile: "nodes.conf",
+		ClusterConfigFile:  "nodes.conf",
+		ClusterNodeTimeout: 15000,
 	}
 }
 

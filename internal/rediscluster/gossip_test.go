@@ -92,3 +92,116 @@ func TestTwoNodesMeetLearnEachOther(t *testing.T) {
 		t.Fatalf("B did not learn A's slots: %+v", aInB)
 	}
 }
+
+func TestGossipMessageTypesRoundTrip(t *testing.T) {
+	for _, mt := range []uint16{msgTypeFail, msgTypeFailoverAuthRequest, msgTypeFailoverAuthAck, msgTypePublishShard} {
+		hdr := clusterMsgHeader{msgType: mt, currentEpoch: 7}
+		encoded := encodeHeader(&hdr)
+		got, err := decodeHeader(encoded)
+		if err != nil {
+			t.Fatalf("roundtrip mt=%d: decode error %v", mt, err)
+		}
+		if got.msgType != mt {
+			t.Fatalf("roundtrip mt=%d: got msgType=%d", mt, got.msgType)
+		}
+		if got.currentEpoch != 7 {
+			t.Fatalf("roundtrip mt=%d: got currentEpoch=%d, want 7", mt, got.currentEpoch)
+		}
+	}
+}
+
+func TestGossipPFailPropagatedAsReport(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	stA := newClusterState("127.0.0.1", 7000, filepath.Join(dirA, "nodes.conf"))
+	stB := newClusterState("127.0.0.1", 7001, filepath.Join(dirB, "nodes.conf"))
+
+	// Make A know about B and vice versa
+	stA.mu.Lock()
+	stA.nodes[stB.self.id] = &clusterNode{id: stB.self.id, ip: "127.0.0.1", port: 7001, cport: 17001, flags: flagMaster, linkUp: true}
+	stA.mu.Unlock()
+	stB.mu.Lock()
+	stB.nodes[stA.self.id] = &clusterNode{id: stA.self.id, ip: "127.0.0.1", port: 7000, cport: 17000, flags: flagMaster, linkUp: true}
+	stB.mu.Unlock()
+
+	// Simulate A receiving a gossip from B that reports a third node C as PFAIL
+	nodeCID := genNodeID()
+	stA.mu.Lock()
+	nodeC := &clusterNode{id: nodeCID, ip: "127.0.0.1", port: 7002, cport: 17002, flags: flagMaster, linkUp: true}
+	stA.nodes[nodeCID] = nodeC
+	stA.mu.Unlock()
+
+	// Build a message from B that includes C with PFAIL flag
+	bus := newGossipBus(stA)
+	hdr := &clusterMsgHeader{
+		msgType:      msgTypePing,
+		currentEpoch: 1,
+		configEpoch:  1,
+		port:         7001,
+		cport:        17001,
+		senderID:     stB.self.id,
+	}
+	entries := []gossipEntry{
+		{id: nodeCID, ip: "127.0.0.1", port: 7002, cport: 17002, flags: uint32(flagPFail)},
+	}
+
+	bus.mergeFromMessage(hdr, entries, "127.0.0.1")
+
+	// Verify: A should have recorded a PFAIL report from B for C
+	stA.mu.RLock()
+	fr := stA.failureReports
+	stA.mu.RUnlock()
+
+	if fr.count(nodeCID) == 0 {
+		t.Fatal("expected PFAIL failure report for nodeC from senderB")
+	}
+
+	// Verify: C should have PFAIL flag set
+	stA.mu.RLock()
+	hasPFail := nodeC.flags&flagPFail != 0
+	stA.mu.RUnlock()
+	if !hasPFail {
+		t.Fatal("nodeC should have PFAIL flag set after gossip")
+	}
+}
+
+func TestGossipFailAdoptedFromGossip(t *testing.T) {
+	dir := t.TempDir()
+	st := newClusterState("127.0.0.1", 7000, filepath.Join(dir, "nodes.conf"))
+
+	nodeBID := genNodeID()
+	nodeCID := genNodeID()
+	st.mu.Lock()
+	nodeB := &clusterNode{id: nodeBID, ip: "127.0.0.1", port: 7001, cport: 17001, flags: flagMaster, linkUp: true}
+	nodeC := &clusterNode{id: nodeCID, ip: "127.0.0.1", port: 7002, cport: 17002, flags: flagMaster, linkUp: true}
+	st.nodes[nodeBID] = nodeB
+	st.nodes[nodeCID] = nodeC
+	st.mu.Unlock()
+
+	bus := newGossipBus(st)
+	hdr := &clusterMsgHeader{
+		msgType:      msgTypeFail,
+		currentEpoch: 1,
+		configEpoch:  1,
+		port:         7001,
+		cport:        17001,
+		senderID:     nodeBID,
+	}
+	entries := []gossipEntry{
+		{id: nodeCID, ip: "127.0.0.1", port: 7002, cport: 17002, flags: uint32(flagFail)},
+	}
+
+	bus.mergeFromMessage(hdr, entries, "127.0.0.1")
+
+	st.mu.RLock()
+	hasFail := nodeC.flags&flagFail != 0
+	hasPFail := nodeC.flags&flagPFail != 0
+	st.mu.RUnlock()
+
+	if !hasFail {
+		t.Fatal("nodeC should have FAIL flag after receiving FAIL gossip")
+	}
+	if hasPFail {
+		t.Fatal("nodeC should NOT have PFAIL flag once FAIL is set")
+	}
+}
