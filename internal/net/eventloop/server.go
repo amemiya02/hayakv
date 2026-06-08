@@ -516,6 +516,7 @@ func (s *Server) buildStreamWakeupCmd(c *client) [][]byte {
 		result := make([][]byte, 0, len(orig))
 		result = append(result, orig[0]) // XREAD or XREADGROUP
 
+		hasCount := false
 		// Copy args before STREAMS, skipping BLOCK <timeout>
 		i := 1
 		for i < len(orig) {
@@ -527,8 +528,16 @@ func (s *Server) buildStreamWakeupCmd(c *client) [][]byte {
 				i += 2 // skip BLOCK and its timeout value
 				continue
 			}
+			if upper == "COUNT" {
+				hasCount = true
+			}
 			result = append(result, orig[i])
 			i++
+		}
+
+		// Ensure COUNT is present (execXRead requires >= 4 args).
+		if !hasCount {
+			result = append(result, []byte("COUNT"), []byte("1"))
 		}
 
 		if i < len(orig) && strings.ToUpper(string(orig[i])) == "STREAMS" {
@@ -551,14 +560,14 @@ func (s *Server) buildStreamWakeupCmd(c *client) [][]byte {
 	}
 
 	// Fallback: minimal reconstruction from blockKeys.
-	result := make([][]byte, 0, len(c.blockKeys)*2+3)
+	result := make([][]byte, 0, len(c.blockKeys)*2+4)
 	result = append(result, []byte(c.blockCmd))
 	if c.blockCmd == "xreadgroup" {
 		// Cannot reconstruct without group/consumer info; this path
 		// should not be reached when blockCmdLine is stored.
 		result = append(result, []byte("GROUP"), []byte("?"), []byte("?"))
 	}
-	result = append(result, []byte("STREAMS"))
+	result = append(result, []byte("COUNT"), []byte("1"), []byte("STREAMS"))
 	for _, k := range c.blockKeys {
 		result = append(result, []byte(k))
 	}
