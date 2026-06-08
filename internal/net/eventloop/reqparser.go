@@ -3,7 +3,6 @@ package eventloop
 import (
 	"bytes"
 	"errors"
-	"strconv"
 )
 
 var (
@@ -11,12 +10,31 @@ var (
 	errIncomplete    = errors.New("incomplete request")
 )
 
+// parseUint parses a non-negative integer from buf without allocating.
+// Returns the value and true on success, or (0, false) on overflow/invalid.
+func parseUint(buf []byte) (int, bool) {
+	if len(buf) == 0 {
+		return 0, false
+	}
+	n := 0
+	for _, b := range buf {
+		if b < '0' || b > '9' {
+			return 0, false
+		}
+		n = n*10 + int(b-'0')
+		if n < 0 { // overflow
+			return 0, false
+		}
+	}
+	return n, true
+}
+
 // parseRequests parses as many complete RESP2 multibulk commands as possible
 // from buf. It returns the parsed commands (each as [][]byte of arguments),
 // the number of bytes consumed from buf, and any error.
 // If the buffer ends mid-command, it returns errIncomplete.
 func parseRequests(buf []byte) ([][][]byte, int, error) {
-	var cmds [][][]byte
+	cmds := make([][][]byte, 0, 8) // pre-allocate for typical pipeline depth
 	offset := 0
 	for offset < len(buf) {
 		cmd, consumed, err := parseOneMultibulk(buf[offset:])
@@ -47,8 +65,8 @@ func parseOneMultibulk(buf []byte) ([][]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	count, err := strconv.Atoi(string(line))
-	if err != nil || count < 0 {
+	count, ok := parseUint(line)
+	if !ok {
 		return nil, 0, errProtocolError
 	}
 	// Account for the '*' we skipped.
@@ -68,9 +86,19 @@ func parseOneMultibulk(buf []byte) ([][]byte, int, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		argLen, err := strconv.Atoi(string(argLine))
-		if err != nil || argLen < -1 {
-			return nil, 0, errProtocolError
+		argLen := 0
+		if len(argLine) > 0 && argLine[0] == '-' {
+			// Negative length: only -1 (null bulk) is valid.
+			if string(argLine) != "-1" {
+				return nil, 0, errProtocolError
+			}
+			argLen = -1
+		} else {
+			var ok bool
+			argLen, ok = parseUint(argLine)
+			if !ok {
+				return nil, 0, errProtocolError
+			}
 		}
 		// Account for the '$' we skipped.
 		consumed += argLineLen + 1

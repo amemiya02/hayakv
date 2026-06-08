@@ -208,8 +208,11 @@ func (s *Server) onReadable(c *client) {
 		s.closeClient(c)
 		return
 	}
-	// Keep any incomplete tail.
-	c.queryBuf = c.queryBuf[consumed:]
+	// Compact: copy incomplete tail to front to reclaim consumed bytes.
+	if consumed > 0 {
+		n := copy(c.queryBuf, c.queryBuf[consumed:])
+		c.queryBuf = c.queryBuf[:n]
+	}
 
 	for _, cmdLine := range cmds {
 		cmdName := strings.ToLower(string(cmdLine[0]))
