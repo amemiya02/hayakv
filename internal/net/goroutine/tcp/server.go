@@ -51,8 +51,10 @@ func ListenAndServeWithSignal(cfg *Config, handler tcp.Handler) error {
 	return nil
 }
 
-// ListenAndServe binds port and handle requests, blocking until close
-func ListenAndServe(listener net.Listener, handler tcp.Handler, closeChan <-chan struct{}) {
+// ServeListener serves connections on an already-created listener, blocking
+// until closeChan is closed or the listener encounters an error.  It is the
+// shared accept-loop used by both the plain TCP and TLS paths.
+func ServeListener(listener net.Listener, handler tcp.Handler, closeChan <-chan struct{}) {
 	// listen signal
 	errCh := make(chan error, 1)
 	defer close(errCh)
@@ -95,4 +97,9 @@ func ListenAndServe(listener net.Listener, handler tcp.Handler, closeChan <-chan
 		}()
 	}
 	waitDone.Wait()
+}
+
+// ListenAndServe binds port and handle requests, blocking until close
+func ListenAndServe(listener net.Listener, handler tcp.Handler, closeChan <-chan struct{}) {
+	ServeListener(listener, handler, closeChan)
 }

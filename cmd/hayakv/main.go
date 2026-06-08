@@ -114,6 +114,21 @@ func main() {
 
 	logger.Info("Ready to accept connections tcp")
 
+	// Start TLS listener if configured.
+	if config.Properties.TLSPort > 0 {
+		tlsAddr := fmt.Sprintf("%s:%d", config.Properties.Bind, config.Properties.TLSPort)
+		tlsHandler := stdserver.NewHandlerWithDB(engine, codec)
+		go func() {
+			logger.Info("TLS server listening on " + tlsAddr)
+			if err := stdserver.ServeTLS(tlsAddr, tlsHandler,
+				config.Properties.TLSCertFile,
+				config.Properties.TLSKeyFile,
+				config.Properties.TLSCACertFile); err != nil {
+				logger.Error("TLS server error: " + err.Error())
+			}
+		}()
+	}
+
 	// Start unix socket listener if configured.
 	if sock := config.Properties.UnixSocket; sock != "" {
 		go func() {

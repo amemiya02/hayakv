@@ -3,6 +3,8 @@ package database
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -153,11 +155,41 @@ func (server *Server) setupMaster() {
 	}
 }
 
+// dialMaster establishes a connection to the master.  When tls-replication is
+// enabled the connection is wrapped with mutual TLS using the configured
+// cert/key/CA files.
+func dialMaster(addr string) (net.Conn, error) {
+	cfg := config.Properties
+	if cfg.TLSReplication && cfg.TLSCertFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load TLS cert for replication: %w", err)
+		}
+		tlsCfg := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		}
+		if cfg.TLSCACertFile != "" {
+			caCert, err := os.ReadFile(cfg.TLSCACertFile)
+			if err != nil {
+				return nil, fmt.Errorf("load CA cert for replication: %w", err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to parse CA cert for replication")
+			}
+			tlsCfg.RootCAs = pool
+		}
+		return tls.Dial("tcp", addr, tlsCfg)
+	}
+	return net.Dial("tcp", addr)
+}
+
 // connectWithMaster finishes handshake with master
 // returns: isFullReSync, error
 func (server *Server) connectWithMaster(configVersion int32) (bool, error) {
 	addr := server.slaveStatus.masterHost + ":" + strconv.Itoa(server.slaveStatus.masterPort)
-	conn, err := net.Dial("tcp", addr)
+	conn, err := dialMaster(addr)
 	if err != nil {
 		server.slaveOfNone() // abort
 		return false, errors.New("connect master failed " + err.Error())

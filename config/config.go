@@ -93,6 +93,16 @@ type ServerProperties struct {
 	// latency monitoring
 	LatencyMonitorThreshold int `cfg:"latency-monitor-threshold"` // ms; 0 = disabled
 
+	// ACL
+	AclFile string `cfg:"aclfile"`
+
+	// TLS
+	TLSPort        int    `cfg:"tls-port"`
+	TLSCertFile    string `cfg:"tls-cert-file"`
+	TLSKeyFile     string `cfg:"tls-key-file"`
+	TLSCACertFile  string `cfg:"tls-ca-cert-file"`
+	TLSReplication bool   `cfg:"tls-replication"`
+
 	rawConfig map[string]string // populated by parse(); used by normalizeMemoryConfig
 }
 

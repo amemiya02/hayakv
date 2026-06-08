@@ -6,10 +6,16 @@ package std
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"io"
 	"net"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/cluster"
@@ -56,6 +62,55 @@ func Serve(addr string, handler *Handler) error {
 	return tcp.ListenAndServeWithSignal(&tcp.Config{
 		Address: addr,
 	}, handler)
+}
+
+// ServeTLS starts a TLS listener on the given address using the provided cert/key
+// files.  If caCertFile is non-empty it enables mutual TLS (client certificate
+// verification).  The function blocks until a shutdown signal is received.
+func ServeTLS(addr string, handler *Handler, certFile, keyFile, caCertFile string) error {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return fmt.Errorf("load TLS cert/key: %w", err)
+	}
+
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	if caCertFile != "" {
+		caCert, err := os.ReadFile(caCertFile)
+		if err != nil {
+			return fmt.Errorf("load CA cert: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caCert) {
+			return fmt.Errorf("failed to parse CA cert")
+		}
+		tlsCfg.ClientCAs = pool
+		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+
+	ln, err := tls.Listen("tcp", addr, tlsCfg)
+	if err != nil {
+		return fmt.Errorf("TLS listen: %w", err)
+	}
+
+	logger.Info(fmt.Sprintf("bind: %s, start TLS listening...", addr))
+
+	closeChan := make(chan struct{})
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig := <-sigCh
+		switch sig {
+		case syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGINT:
+			closeChan <- struct{}{}
+		}
+	}()
+
+	tcp.ServeListener(ln, handler, closeChan)
+	return nil
 }
 
 func (h *Handler) closeClient(client *connection.Connection) {
