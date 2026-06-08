@@ -227,22 +227,45 @@ func (s *Server) onReadable(c *client) {
 			}
 		}
 
-		// Blocking command integration: if BLPOP/BRPOP returned null
-		// (empty list), register the client as a waiter.
+		// Blocking command integration: if BLPOP/BRPOP/XREAD/XREADGROUP
+		// returned null, register the client as a waiter.
 		if isBlockCommand(cmdName) && reply != nil && isNullReply(reply) {
-			// Remove only the null reply we just buffered, keeping
-			// any earlier pipeline replies intact.
-			c.bc.truncateTo(preLen)
-			keys := extractBlockKeys(cmdLine)
-			c.blockKeys = keys
-			c.blockCmd = cmdName
-			c.blockDeadline = extractBlockDeadline(cmdLine)
-			s.blocks.block(c, keys)
-			break // stop processing further pipelined commands
+			var keys []string
+			var deadline int64
+
+			if cmdName == "xread" || cmdName == "xreadgroup" {
+				keys = extractStreamBlockKeys(cmdLine)
+				deadline = extractStreamBlockDeadline(cmdLine)
+			} else {
+				keys = extractBlockKeys(cmdLine)
+				deadline = extractBlockDeadline(cmdLine)
+			}
+
+			if len(keys) > 0 && deadline > 0 {
+				// Remove only the null reply we just buffered, keeping
+				// any earlier pipeline replies intact.
+				c.bc.truncateTo(preLen)
+				c.blockKeys = keys
+				c.blockCmd = cmdName
+				c.blockDeadline = deadline
+				// Store the original command line for reconstruction
+				// during wakeup (needed for XREAD/XREADGROUP options).
+				storedCmd := make([][]byte, len(cmdLine))
+				copy(storedCmd, cmdLine)
+				c.blockCmdLine = storedCmd
+				s.blocks.block(c, keys)
+				break // stop processing further pipelined commands
+			}
+			// If deadline is 0, no BLOCK was specified — just send the null reply.
 		}
 
 		// After list-modifying commands, wake blocked waiters.
 		if isListPushCommand(cmdName) && len(cmdLine) >= 2 {
+			pushKey := string(cmdLine[1])
+			s.wakeBlockedClients(pushKey)
+		}
+		// After stream-modifying commands, wake blocked waiters.
+		if isStreamAddCommand(cmdName) && len(cmdLine) >= 2 {
 			pushKey := string(cmdLine[1])
 			s.wakeBlockedClients(pushKey)
 		}
@@ -341,7 +364,11 @@ var _ iface.NetServer = (*Server)(nil)
 // --- Blocking command helpers ---
 
 func isBlockCommand(name string) bool {
-	return name == "blpop" || name == "brpop"
+	return name == "blpop" || name == "brpop" || name == "xread" || name == "xreadgroup"
+}
+
+func isStreamAddCommand(name string) bool {
+	return name == "xadd"
 }
 
 func isListPushCommand(name string) bool {
@@ -385,9 +412,56 @@ func extractBlockDeadline(cmdLine [][]byte) int64 {
 	return time.Now().UnixNano() + int64(timeoutSec*1e9)
 }
 
+// extractStreamBlockKeys extracts the stream keys from XREAD/XREADGROUP
+// STREAMS key1 key2 ... id1 id2 ... syntax.
+func extractStreamBlockKeys(cmdLine [][]byte) []string {
+	streamsIdx := -1
+	for i, arg := range cmdLine {
+		if strings.ToUpper(string(arg)) == "STREAMS" {
+			streamsIdx = i
+			break
+		}
+	}
+	if streamsIdx < 0 {
+		return nil
+	}
+	remaining := len(cmdLine) - streamsIdx - 1
+	if remaining%2 != 0 || remaining == 0 {
+		return nil
+	}
+	keyCount := remaining / 2
+	keys := make([]string, keyCount)
+	for i := 0; i < keyCount; i++ {
+		keys[i] = string(cmdLine[streamsIdx+1+i])
+	}
+	return keys
+}
+
+// extractStreamBlockDeadline parses the BLOCK timeout from XREAD/XREADGROUP
+// args and returns a monotonic deadline in nanoseconds. Returns 0 if BLOCK is
+// not specified or timeout is 0 (block indefinitely, handled as deadline=0
+// with special semantics by the caller).
+func extractStreamBlockDeadline(cmdLine [][]byte) int64 {
+	for i, arg := range cmdLine {
+		if strings.ToUpper(string(arg)) == "BLOCK" && i+1 < len(cmdLine) {
+			timeoutMs, err := strconv.ParseInt(string(cmdLine[i+1]), 10, 64)
+			if err != nil || timeoutMs < 0 {
+				return 0
+			}
+			if timeoutMs == 0 {
+				// Block indefinitely: use a far-future deadline.
+				return time.Now().UnixNano() + 3600*24*365*1e9 // 1 year
+			}
+			return time.Now().UnixNano() + timeoutMs*1e6
+		}
+	}
+	return 0
+}
+
 // wakeBlockedClients checks if any client is blocked on pushKey and retries
-// their BLPOP/BRPOP. If the list now has elements, the client gets a reply
-// and is unblocked.
+// their blocking command. For BLPOP/BRPOP, if the list now has elements the
+// client gets a reply and is unblocked. For XREAD/XREADGROUP, if new stream
+// entries are available the client gets a reply and is unblocked.
 func (s *Server) wakeBlockedClients(pushKey string) {
 	waiters := s.blocks.waiters(pushKey)
 	if len(waiters) == 0 {
@@ -398,18 +472,26 @@ func (s *Server) wakeBlockedClients(pushKey string) {
 	copy(pending, waiters)
 
 	for _, c := range pending {
-		// Re-issue the blocking command. If the list now has elements,
-		// the engine will return a real reply.
-		blockCmd := make([][]byte, 0, len(c.blockKeys)+2)
-		blockCmd = append(blockCmd, []byte(c.blockCmd))
-		for _, k := range c.blockKeys {
-			blockCmd = append(blockCmd, []byte(k))
+		var blockCmd [][]byte
+
+		if c.blockCmd == "xread" || c.blockCmd == "xreadgroup" {
+			// Reconstruct the XREAD/XREADGROUP command for wakeup.
+			// We reuse the original command line but replace stream IDs
+			// with "0-0" so that any entry present is returned.
+			blockCmd = s.buildStreamWakeupCmd(c)
+		} else {
+			// BLPOP/BRPOP: re-issue with timeout 0 (immediate check).
+			blockCmd = make([][]byte, 0, len(c.blockKeys)+2)
+			blockCmd = append(blockCmd, []byte(c.blockCmd))
+			for _, k := range c.blockKeys {
+				blockCmd = append(blockCmd, []byte(k))
+			}
+			blockCmd = append(blockCmd, []byte("0"))
 		}
-		blockCmd = append(blockCmd, []byte("0")) // timeout 0 = already checked
 
 		reply := s.engine.Exec(c.conn, blockCmd)
 		if reply != nil && !isNullReply(reply) {
-			// Got an element — send reply and unblock.
+			// Got a result — send reply and unblock.
 			encoded := s.codec.Encode(reply, c.conn.Protocol())
 			if len(encoded) > 0 {
 				c.bc.Write(encoded)
@@ -417,10 +499,73 @@ func (s *Server) wakeBlockedClients(pushKey string) {
 			s.blocks.unblock(c)
 			c.blockKeys = nil
 			c.blockCmd = ""
+			c.blockCmdLine = nil
 			s.flush(c)
 		}
 		// If still null, leave the client blocked.
 	}
+}
+
+// buildStreamWakeupCmd reconstructs an XREAD/XREADGROUP command for wakeup
+// checks. It strips BLOCK and replaces stream IDs with "0-0" so any existing
+// entries are returned.
+func (s *Server) buildStreamWakeupCmd(c *client) [][]byte {
+	if len(c.blockCmdLine) > 0 {
+		// Rebuild from original command line, stripping BLOCK and replacing IDs.
+		orig := c.blockCmdLine
+		result := make([][]byte, 0, len(orig))
+		result = append(result, orig[0]) // XREAD or XREADGROUP
+
+		// Copy args before STREAMS, skipping BLOCK <timeout>
+		i := 1
+		for i < len(orig) {
+			upper := strings.ToUpper(string(orig[i]))
+			if upper == "STREAMS" {
+				break
+			}
+			if upper == "BLOCK" {
+				i += 2 // skip BLOCK and its timeout value
+				continue
+			}
+			result = append(result, orig[i])
+			i++
+		}
+
+		if i < len(orig) && strings.ToUpper(string(orig[i])) == "STREAMS" {
+			result = append(result, orig[i]) // STREAMS keyword
+			i++
+			remaining := len(orig) - i
+			if remaining > 0 && remaining%2 == 0 {
+				keyCount := remaining / 2
+				// Add keys
+				for j := 0; j < keyCount; j++ {
+					result = append(result, orig[i+j])
+				}
+				// Add "0-0" for each key (replaces original IDs)
+				for j := 0; j < keyCount; j++ {
+					result = append(result, []byte("0-0"))
+				}
+				return result
+			}
+		}
+	}
+
+	// Fallback: minimal reconstruction from blockKeys.
+	result := make([][]byte, 0, len(c.blockKeys)*2+3)
+	result = append(result, []byte(c.blockCmd))
+	if c.blockCmd == "xreadgroup" {
+		// Cannot reconstruct without group/consumer info; this path
+		// should not be reached when blockCmdLine is stored.
+		result = append(result, []byte("GROUP"), []byte("?"), []byte("?"))
+	}
+	result = append(result, []byte("STREAMS"))
+	for _, k := range c.blockKeys {
+		result = append(result, []byte(k))
+	}
+	for range c.blockKeys {
+		result = append(result, []byte("0-0"))
+	}
+	return result
 }
 
 // expireBlockedClients scans all clients and unblocks any whose timeout has
@@ -440,6 +585,7 @@ func (s *Server) expireBlockedClients() {
 			s.blocks.unblock(c)
 			c.blockKeys = nil
 			c.blockCmd = ""
+			c.blockCmdLine = nil
 			c.blockDeadline = 0
 			s.flush(c)
 		}

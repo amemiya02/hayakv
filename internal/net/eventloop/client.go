@@ -11,9 +11,10 @@ type client struct {
 	bc            *bufConn
 	conn          *connection.Connection
 	wantWrite     bool
-	blockKeys     []string // keys this client is blocked on (BLPOP/BRPOP), nil if not blocked
-	blockCmd      string   // original command name: "blpop" or "brpop"
+	blockKeys     []string // keys this client is blocked on (BLPOP/BRPOP/XREAD/XREADGROUP), nil if not blocked
+	blockCmd      string   // original command name: "blpop", "brpop", "xread", or "xreadgroup"
 	blockDeadline int64    // monotonic deadline in nanoseconds; 0 means no timeout
+	blockCmdLine  [][]byte // original command line for reconstruction during wakeup
 }
 
 // newClient creates a client for the given fd and remote address.
