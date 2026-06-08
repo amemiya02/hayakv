@@ -231,3 +231,126 @@ func TestEventloopFlushAll(t *testing.T) {
 		t.Fatalf("FLUSHALL reply = %q, want OK", reply)
 	}
 }
+
+// TestEventloopXReadBlockUnblocks verifies that XREAD BLOCK unblocks when
+// XADD adds a new entry to the stream.
+func TestEventloopXReadBlockUnblocks(t *testing.T) {
+	addr, stop := startHayakvEventloop(t)
+	defer stop()
+
+	// Reader connection: issues XREAD BLOCK.
+	readerConn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial reader: %v", err)
+	}
+	defer readerConn.Close()
+	readerR := bufio.NewReader(readerConn)
+
+	// Writer connection: issues XADD.
+	writerConn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial writer: %v", err)
+	}
+	defer writerConn.Close()
+	writerR := bufio.NewReader(writerConn)
+
+	// FLUSHALL first.
+	if _, err := readerConn.Write(encodeCmd("FLUSHALL")); err != nil {
+		t.Fatalf("write FLUSHALL: %v", err)
+	}
+	if _, err := readRESP(readerR); err != nil {
+		t.Fatalf("read FLUSHALL: %v", err)
+	}
+
+	// Start XREAD BLOCK 5000 STREAMS mystream $ in a goroutine.
+	type readResult struct {
+		reply string
+		err   error
+	}
+	ch := make(chan readResult, 1)
+	go func() {
+		// XREAD BLOCK 5000 STREAMS mystream $
+		xreadCmd := encodeCmd("XREAD", "BLOCK", "5000", "STREAMS", "mystream", "$")
+		if _, err := readerConn.Write(xreadCmd); err != nil {
+			ch <- readResult{"", err}
+			return
+		}
+		reply, err := readRESP(readerR)
+		ch <- readResult{reply, err}
+	}()
+
+	// Give the reader time to block.
+	time.Sleep(300 * time.Millisecond)
+
+	// XADD a value to mystream.
+	xaddCmd := encodeCmd("XADD", "mystream", "*", "f1", "v1")
+	if _, err := writerConn.Write(xaddCmd); err != nil {
+		t.Fatalf("write XADD: %v", err)
+	}
+	// Read XADD reply (the assigned ID).
+	xaddReply, err := readRESP(writerR)
+	if err != nil {
+		t.Fatalf("read XADD: %v", err)
+	}
+	if !strings.Contains(xaddReply, "-") { // ID contains '-'
+		t.Fatalf("XADD reply = %q, want stream ID", xaddReply)
+	}
+
+	// Wait for the reader to unblock.
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			t.Fatalf("XREAD BLOCK error: %v", res.err)
+		}
+		// The reply should contain "mystream" and "f1" and "v1".
+		if !strings.Contains(res.reply, "mystream") {
+			t.Fatalf("XREAD BLOCK reply = %q, want stream name 'mystream'", res.reply)
+		}
+		if !strings.Contains(res.reply, "f1") {
+			t.Fatalf("XREAD BLOCK reply = %q, want field 'f1'", res.reply)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("XREAD BLOCK did not unblock within timeout")
+	}
+}
+
+// TestEventloopXReadBlockTimeout verifies that XREAD BLOCK returns null
+// when the timeout expires without any new entries.
+func TestEventloopXReadBlockTimeout(t *testing.T) {
+	addr, stop := startHayakvEventloop(t)
+	defer stop()
+
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+
+	// FLUSHALL first.
+	if _, err := conn.Write(encodeCmd("FLUSHALL")); err != nil {
+		t.Fatalf("write FLUSHALL: %v", err)
+	}
+	if _, err := readRESP(reader); err != nil {
+		t.Fatalf("read FLUSHALL: %v", err)
+	}
+
+	start := time.Now()
+	// XREAD BLOCK 500 STREAMS mystream $
+	xreadCmd := encodeCmd("XREAD", "BLOCK", "500", "STREAMS", "mystream", "$")
+	if _, err := conn.Write(xreadCmd); err != nil {
+		t.Fatalf("write XREAD: %v", err)
+	}
+	reply, err := readRESP(reader)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("read XREAD: %v", err)
+	}
+	// Should return null (*-1\r\n) after ~500ms.
+	if !strings.Contains(reply, "*-1") {
+		t.Fatalf("XREAD BLOCK timeout reply = %q, want *-1 (null)", reply)
+	}
+	if elapsed < 400*time.Millisecond {
+		t.Fatalf("XREAD BLOCK returned too quickly: %v", elapsed)
+	}
+}

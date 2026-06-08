@@ -140,3 +140,5 @@ func (connStub) BcastPrefixes() []string        { return nil }
 func (connStub) SetBcastPrefixes([]string)      {}
 func (connStub) CachingNext() bool              { return false }
 func (connStub) SetCachingNext(bool)            {}
+func (connStub) SetUser(interface{})            {}
+func (connStub) User() interface{}              { return nil }

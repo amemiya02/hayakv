@@ -98,6 +98,8 @@ func (f *fakeConn) BcastPrefixes() []string   { return nil }
 func (f *fakeConn) SetBcastPrefixes([]string) {}
 func (f *fakeConn) CachingNext() bool         { return false }
 func (f *fakeConn) SetCachingNext(bool)       {}
+func (f *fakeConn) SetUser(interface{})       {}
+func (f *fakeConn) User() interface{}         { return nil }
 
 // ---------- tests ----------
 
