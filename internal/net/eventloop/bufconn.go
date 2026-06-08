@@ -36,10 +36,11 @@ func (c *bufConn) hasOut() bool {
 	return len(c.out) > 0
 }
 
-// takeOut returns the buffered output and resets the buffer.
+// takeOut returns the buffered output and resets the buffer,
+// reusing the backing array for subsequent writes.
 func (c *bufConn) takeOut() []byte {
 	out := c.out
-	c.out = nil
+	c.out = out[:0]
 	return out
 }
 
