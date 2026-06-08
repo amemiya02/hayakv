@@ -29,14 +29,14 @@ func TestAuth(t *testing.T) {
 	ret := testServer.Exec(c, utils.ToCmdLine("AUTH"))
 	asserts.AssertErrReply(t, ret, "ERR wrong number of arguments for 'auth' command")
 	ret = testServer.Exec(c, utils.ToCmdLine("AUTH", passwd))
-	asserts.AssertErrReply(t, ret, "ERR Client sent AUTH, but no password is set")
+	asserts.AssertErrReply(t, ret, "ERR Client sent AUTH, but no password is set. Did you mean AUTH <username> <password>?")
 
 	config.Properties.RequirePass = passwd
 	defer func() {
 		config.Properties.RequirePass = ""
 	}()
 	ret = testServer.Exec(c, utils.ToCmdLine("AUTH", passwd+"wrong"))
-	asserts.AssertErrReply(t, ret, "ERR invalid password")
+	asserts.AssertErrReply(t, ret, "WRONGPASS invalid username-password pair or user is disabled.")
 	ret = testServer.Exec(c, utils.ToCmdLine("GET", "A"))
 	asserts.AssertErrReply(t, ret, "NOAUTH Authentication required")
 	ret = testServer.Exec(c, utils.ToCmdLine("AUTH", passwd))

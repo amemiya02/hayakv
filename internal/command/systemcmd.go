@@ -87,13 +87,13 @@ func Auth(c redis.Connection, args [][]byte) redis.Reply {
 		// Legacy 1-arg AUTH: authenticate as "default" user
 		if config.Properties.RequirePass == "" {
 			// No password configured at all — reject AUTH
-			return protocol.MakeErrReply("ERR Client sent AUTH, but no password is set")
+			return protocol.MakeErrReply("ERR Client sent AUTH, but no password is set. Did you mean AUTH <username> <password>?")
 		}
 		passwd := string(args[0])
 		c.SetPassword(passwd)
 		// Legacy single-password check (overrides ACL nopass)
 		if config.Properties.RequirePass != passwd {
-			return protocol.MakeErrReply("ERR invalid password")
+			return protocol.MakeErrReply("WRONGPASS invalid username-password pair or user is disabled.")
 		}
 		// Wire user through ACL if available
 		if globalACL != nil {
