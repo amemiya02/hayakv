@@ -124,3 +124,37 @@ func backlenSize(entryLen int) int {
 		return 5
 	}
 }
+
+// parseIntset decodes a Redis intset blob into decimal-ASCII members.
+// Layout: 4-byte encoding LE (2|4|8), 4-byte length LE, then length signed
+// little-endian integers of `encoding` bytes each.
+func parseIntset(blob []byte) ([][]byte, error) {
+	if len(blob) < 8 {
+		return nil, fmt.Errorf("rdb: intset too short (%d bytes)", len(blob))
+	}
+	enc := binary.LittleEndian.Uint32(blob[0:4])
+	length := binary.LittleEndian.Uint32(blob[4:8])
+	if enc != 2 && enc != 4 && enc != 8 {
+		return nil, fmt.Errorf("rdb: intset bad encoding %d", enc)
+	}
+	need := 8 + int(length)*int(enc)
+	if need > len(blob) {
+		return nil, fmt.Errorf("rdb: intset length %d*%d overflows blob %d", length, enc, len(blob))
+	}
+	out := make([][]byte, 0, length)
+	p := 8
+	for i := uint32(0); i < length; i++ {
+		var v int64
+		switch enc {
+		case 2:
+			v = int64(int16(binary.LittleEndian.Uint16(blob[p : p+2])))
+		case 4:
+			v = int64(int32(binary.LittleEndian.Uint32(blob[p : p+4])))
+		case 8:
+			v = int64(binary.LittleEndian.Uint64(blob[p : p+8]))
+		}
+		out = append(out, []byte(strconv.FormatInt(v, 10)))
+		p += int(enc)
+	}
+	return out, nil
+}

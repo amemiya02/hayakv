@@ -62,3 +62,45 @@ func TestParseListpackRejectsTruncated(t *testing.T) {
 		t.Fatal("expected error for truncated listpack")
 	}
 }
+
+func TestParseIntset(t *testing.T) {
+	// encoding=2 (int16), length=3, values 1,2,3 (all little-endian)
+	blob := []byte{
+		0x02, 0x00, 0x00, 0x00, // encoding = 2 bytes/int
+		0x03, 0x00, 0x00, 0x00, // length = 3
+		0x01, 0x00, // 1
+		0x02, 0x00, // 2
+		0x03, 0x00, // 3
+	}
+	got, err := parseIntset(blob)
+	if err != nil {
+		t.Fatalf("parseIntset: %v", err)
+	}
+	want := [][]byte{[]byte("1"), []byte("2"), []byte("3")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestParseIntsetInt64Negative(t *testing.T) {
+	// encoding=8 (int64), length=1, value -2
+	blob := []byte{
+		0x08, 0x00, 0x00, 0x00,
+		0x01, 0x00, 0x00, 0x00,
+		0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // -2
+	}
+	got, err := parseIntset(blob)
+	if err != nil {
+		t.Fatalf("parseIntset: %v", err)
+	}
+	if len(got) != 1 || string(got[0]) != "-2" {
+		t.Fatalf("got %q, want [-2]", got)
+	}
+}
+
+func TestParseIntsetRejectsBadEncoding(t *testing.T) {
+	blob := []byte{0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	if _, err := parseIntset(blob); err == nil {
+		t.Fatal("expected error for encoding=3")
+	}
+}
