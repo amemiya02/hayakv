@@ -206,7 +206,7 @@ ok      github.com/amemiya02/hayakv/test/diff   0.426s
 | `corpus_keyspace_test.go` | keyspace 通知 |
 | 其他 | pubsub / eval / geo / hashttl / resp3 / 8x / auth / census / cluster / redisdb |
 
-`setnx` 已在 `corpus_base_test.go:40-43`：
+`setnx` 已在 `corpus_variants_test.go:40-43`：
 
 ```go
 {Name: "setnx", Commands: []Command{
