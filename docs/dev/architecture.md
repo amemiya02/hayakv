@@ -6,7 +6,7 @@
 
 ## 1. 为什么是 strangler-fig 架构
 
-hayakv fork 自 [HDT3213/godis](https://github.com/HDT3213/godis)，目标是逐层向 Redis 8.x 对齐，以**字节级回复一致性**作为验收标准（由差分测试哈ness 强制执行）。
+hayakv fork 自 [HDT3213/godis](https://github.com/HDT3213/godis)，目标是逐层向 Redis 8.x 对齐，以**字节级回复一致性**作为验收标准（由差分测试 harness 强制执行）。
 
 直接重写整个 godis 风险高、周期长。strangler-fig 模式提供了一条务实的路径：
 
@@ -25,9 +25,11 @@ hayakv fork 自 [HDT3213/godis](https://github.com/HDT3213/godis)，目标是逐
 
 ---
 
-## 2. 三个 seam 的接口定义
+## 2. seam 接口定义
 
-所有 seam 接口集中定义在 `internal/iface/seams.go`，是阅读整个项目的起点。
+所有接口集中定义在 `internal/iface/seams.go`，是阅读整个项目的起点。
+
+以下 **三个接口**对应第 1 节的三个配置键，可在运行时切换实现。后续两个辅助接口（`Object`、`ScriptEngine`）不通过配置键切换，固定使用单一实现。
 
 ### NetServer（L25）
 
@@ -81,6 +83,10 @@ type StorageEngine interface {
 
 "执行一条命令"的抽象——seam 切在命令执行高度（详见第 4 节）。
 
+### 辅助接口（非配置键切换）
+
+以下两个接口固定使用单一实现，不对应任何配置键，仅作为内部约定存在。
+
 ### Object（L70）
 
 ```go
@@ -125,7 +131,7 @@ type ScriptEngine interface {
 
 ```
 NewStorageEngine(cfg)            // 创建 engine（含锁包裹）
-MaybeWrapCluster(cfg, engine)    // 可选：Redis Cluster 装饰器
+MaybeWrapCluster(cfg, engine)    // 可选：若 cfg 启用 cluster 模式，用 Redis Cluster 代理装饰 engine（internal/rediscluster）
 NewNetServerWithEngine(cfg, engine)  // 创建 NetServer
 NewProtocolCodec(cfg)            // 创建 codec
 // eventloop 后端：通过 SetCodec 接口注入 codec（main.go:108）
@@ -180,7 +186,7 @@ func MakeDict() Dict {
 | | `net=goroutine`（多 goroutine 并发） | `net=eventloop`（单线程串行） |
 |---|---|---|
 | `engine=shardmap` | **分片锁**：`ConcurrentDict` 内部按 key hash 分 shard，每 shard 一把 `sync.RWMutex`，goroutine 之间几乎无竞争 | **分片锁**（同左，事件循环单线程执行，实际上锁不会被争抢） |
-| `engine=redisdb` | **全局互斥锁**：`server.NewLockedEngine`（`internal/server/locked_engine.go:19`）将所有 `Exec`/`AfterClientClose`/`Close` 调用串行化；`RedisDict` 本身不加锁 | **无显式锁**：事件循环单线程串行执行，天然互斥；codec 通过 `SetCodec` 接口注入（`cmd/hayakv/main.go:108`） |
+| `engine=redisdb` | **全局互斥锁**：`server.NewLockedEngine`（`internal/server/locked_engine.go:19`）将所有 `Exec`/`AfterClientClose`/`Close` 调用串行化；`RedisDict` 本身不加锁 | **无显式锁**：事件循环单线程串行执行，天然互斥 |
 
 `NewLockedEngine` 实现非常简单——一把 `sync.Mutex` 包住所有三个接口方法（`internal/server/locked_engine.go`）：
 
@@ -214,7 +220,7 @@ flowchart LR
     command --> persist["internal/persist\nAOF / RDB"]
 ```
 
-> 注意：`NetServer` 和 `ProtocolCodec` 在 goroutine 后端是通过 `NetHandler`（`goroutine.HandlerWithDB`）内嵌耦合的；在 eventloop 后端，codec 通过 `SetCodec` 在启动时注入到 `NetServer`。两者都满足上图的逻辑数据流。
+> 注意：`NetServer` 和 `ProtocolCodec` 在 goroutine 后端是通过 `NetHandler`（`goroutine.Handler`，由 `NewHandlerWithDB` 构造）内嵌耦合的；在 eventloop 后端，codec 通过 `SetCodec` 在启动时注入到 `NetServer`。两者都满足上图的逻辑数据流。
 
 ### 动态流程：一次命令请求的生命周期
 
@@ -222,17 +228,22 @@ flowchart LR
 sequenceDiagram
     participant C as 客户端
     participant N as NetServer
+    participant HH as NetHandler
     participant P as ProtocolCodec
     participant E as StorageEngine
     participant H as command handler
     C->>N: TCP 字节流
-    N->>P: DecodeStream（读字节 → ProtocolPayload）
-    P->>E: Exec(conn, cmdLine)
+    N->>HH: Handle(ctx, conn)
+    HH->>P: DecodeStream（读字节 → ProtocolPayload）
+    HH->>E: Exec(conn, cmdLine)
     E->>H: 路由到具体 handler（string/hash/…）
     H-->>E: iredis.Reply
-    E-->>P: Encode(reply, respVersion)
+    E-->>HH: iredis.Reply
+    HH->>P: Encode(reply, respVersion)
     P-->>C: RESP 字节流
 ```
+
+> 注意：goroutine 后端中 `NetHandler`（`goroutine.Handler`，由 `NewHandlerWithDB` 构造）内嵌 `ProtocolCodec` 与 `StorageEngine`，三者耦合在同一 goroutine 内；eventloop 后端中 codec 在启动时通过 `SetCodec` 注入到 `NetServer`，`NetHandler` 概念由事件循环回调承担。两者都满足上图的逻辑数据流。
 
 ---
 
