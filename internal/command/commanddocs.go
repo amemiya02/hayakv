@@ -11,17 +11,17 @@ import (
 // It mirrors the argument specification returned by COMMAND DOCS, which
 // redis-cli uses for inline hints and tab-completion.
 type cmdArg struct {
-	name        string   // argument name identifier (e.g. "key", "value", "seconds")
-	typ         string   // "key", "string", "integer", "double", "pattern", "unix-time", "pure-token", "oneof", "block"
-	displayText string   // display text for the hint; omit if same as name
-	token       string   // preceding token for token+value args (e.g. "EX", "NX")
-	optional    bool     // whether the argument is optional
-	multiple    bool     // whether the argument can repeat
-	keySpecIdx  int      // key_spec_index (0-based); only emitted when hasKeySpecIdx is true
-	hasKeySpecIdx bool   // true when keySpecIdx was explicitly set
-	since       string   // version that added this argument (omit if original)
-	flags       []string // explicit flags to emit (e.g. "optional", "multiple")
-	subArgs     []cmdArg // nested arguments for oneof/block types
+	name          string   // argument name identifier (e.g. "key", "value", "seconds")
+	typ           string   // "key", "string", "integer", "double", "pattern", "unix-time", "pure-token", "oneof", "block"
+	displayText   string   // display text for the hint; omit if same as name
+	token         string   // preceding token for token+value args (e.g. "EX", "NX")
+	optional      bool     // whether the argument is optional
+	multiple      bool     // whether the argument can repeat
+	keySpecIdx    int      // key_spec_index (0-based); only emitted when hasKeySpecIdx is true
+	hasKeySpecIdx bool     // true when keySpecIdx was explicitly set
+	since         string   // version that added this argument (omit if original)
+	flags         []string // explicit flags to emit (e.g. "optional", "multiple")
+	subArgs       []cmdArg // nested arguments for oneof/block types
 }
 
 type cmdDoc struct {
@@ -305,7 +305,7 @@ var cmdDocs = map[string]cmdDoc{
 	// --- connection ---
 	"ping": {
 		summary: "Ping the server", since: "1.0.0", group: "connection",
-		arguments:    []cmdArg{opt(as("message"))},
+		arguments: []cmdArg{opt(as("message"))},
 	},
 	"echo": {
 		summary: "Echo the given string", since: "1.0.0", group: "connection",
