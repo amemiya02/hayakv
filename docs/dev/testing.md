@@ -67,7 +67,7 @@ HAYAKV_DIFF_REDIS_ADDR=127.0.0.1:6379 go test ./test/diff -count=1
 docker run --rm --name hayakv-redis8-<nano> -p <port>:6379 redis:8 redis-server --save "" --appendonly no
 ```
 
-容器在测试结束后自动销毁（`docker rm -f`）。Redis 镜像标签为 `redis:8`，版本锁定由 `test/tcl/redisversion.go` 中的常量 `RedisImageTag = "redis:8.4.2"` 描述——但 harness 本身拉取的是 `redis:8`（浮动到最新 8.x patch），CI 使用锁定版本 `redis:8.4.2`。
+容器在测试结束后自动销毁（`docker rm -f`）。注意版本差异：harness 拉取的是**浮动标签** `redis:8`（跟随最新 8.x patch），而 CI 的 service 容器钉死在 `redis:8.4.2`；`test/tcl/redisversion.go` 中的 `RedisImageTag = "redis:8.4.2"` 只约束 TCL 运行器（见 §4），与差分 harness 无关。本地差分结果若与 CI 不一致，先核对两边 Redis 小版本。
 
 **第三级 — 干净 skip**
 
@@ -75,7 +75,7 @@ docker run --rm --name hayakv-redis8-<nano> -p <port>:6379 redis:8 redis-server 
 
 ```
 === RUN   TestDifferentialRESP2
-    harness_test.go:480: docker daemon not reachable; set HAYAKV_DIFF_REDIS_ADDR or start Docker
+    harness_test.go:246: docker daemon not reachable; set HAYAKV_DIFF_REDIS_ADDR or start Docker
 --- SKIP: TestDifferentialRESP2 (1.79s)
 PASS
 ok  	github.com/amemiya02/hayakv/test/diff	2.191s
@@ -231,6 +231,7 @@ services:
     options: >-
       --health-cmd "redis-cli ping"
       --health-interval 2s
+      --health-timeout 2s
       --health-retries 30
 ```
 
@@ -241,6 +242,7 @@ services:
 | Step | 命令 | 说明 |
 |---|---|---|
 | Install redis-cli | `sudo apt-get install -y redis-tools` | 集成测试需要 redis-cli |
+| Download dependencies | `go mod download` | 预热 Go module 缓存 |
 | **Verify formatting** | `test -z "$(gofmt -l $(find . -name '*.go' -type f))"` | 格式不合规直接失败 |
 | **Vet** | `go vet ./...` | 静态分析 |
 | **Race tests** | `go test -race -count=1 ./config ./internal/datastruct/... ./internal/proto/... ./internal/net/goroutine ./internal/net/eventloop ./internal/server ./internal/iface ./cmd/hayakv -timeout 10m` | 大多数包的竞态检测 |
