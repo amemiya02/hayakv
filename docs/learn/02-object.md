@@ -412,7 +412,7 @@ raw
 
 正好 44 字节 → `embstr`，45 字节 → `raw`，与 Redis 8.x 完全一致。
 
-### 4.3 APPEND 行为差异
+### 4.3 修改类命令的编码升级
 
 ```
 $ redis-cli -p 6399 set s hello && redis-cli -p 6399 object encoding s
@@ -421,19 +421,21 @@ embstr
 
 $ redis-cli -p 6399 append s world && redis-cli -p 6399 object encoding s
 10
-embstr
+raw
 ```
 
-**真实 Redis 的行为：** `APPEND` 之后 encoding 会变成 `raw`，因为 Redis 将
-embstr 视为不可变，任何修改都强制升级。
+`APPEND` 之后 encoding 升级为 `raw`——Redis 把 embstr 视为不可变，任何就地
+修改（`APPEND`、`SETRANGE`、`SETBIT`、`BITFIELD`、`BITOP`）都强制转 raw，
+即便结果仍短于 44 字节、甚至是纯数字。hayakv 由 `execAppend` 区分两条路径：
+修改已有值走 `MakeRawStringObject`（恒 raw），新建 key 则与 `SET` 同款走
+`MakeStringObject` 编码判定（`internal/command/string.go` 的 `execAppend`）——
+这与真实 Redis `appendCommand` 的 create/modify 分支一一对应。
 
-**hayakv 的当前行为：** `execAppend`（`internal/command/string.go` 第 686–698
-行）把拼接后的字节传回 `MakeStringObject`，后者重新判断编码。由于
-`"helloworld"` 是 10 字节（≤ 44 且不是纯整数），所以得到 `embstr`——没有保留
-"经过修改就升级为 raw"的语义。
-
-这是 hayakv 与真实 Redis 的一处已知行为差异。在差分测试语料中，`APPEND` 后
-查询 `OBJECT ENCODING` 的用例尚未被覆盖，感兴趣的读者可以将其作为贡献点。
+> **一段方法论花絮**：本章初版写作时，hayakv 的 `APPEND` 实现是无脑重新编码，
+> `"helloworld"`（10 字节）会回到 embstr——与真实 Redis 不一致。这个 bug 恰恰
+> 是写这份文档做实验时发现的，随后通过补差分语料（`append_encoding` 等场景，
+> 见 `test/diff/corpus_variants_test.go`）固化修复。第 10 章讲的"以真实 Redis
+> 为 oracle"在这里完成了一次现场演示。
 
 ### 4.4 运行对象包单元测试
 

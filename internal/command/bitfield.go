@@ -287,7 +287,7 @@ func execBitfield(db *DB, args [][]byte) redis.Reply {
 
 	// Persist the bitmap
 	if isNew {
-		db.PutEntity(key, &database.DataEntity{Data: object.MakeStringObject(bm.ToBytes())})
+		db.PutEntity(key, &database.DataEntity{Data: object.MakeRawStringObject(bm.ToBytes())})
 	} else {
 		entity, _ := db.GetEntity(key)
 		if robj, ok := entity.Data.(*object.Robj); ok {

@@ -690,10 +690,17 @@ func execAppend(db *DB, args [][]byte) redis.Reply {
 	if err != nil {
 		return err
 	}
+	_, existed := db.GetEntity(key)
 	bytes = append(bytes, args[1]...)
-	db.PutEntity(key, &database.DataEntity{
-		Data: object.MakeStringObject(bytes),
-	})
+	var data *object.Robj
+	if existed {
+		// Redis appends in place via sdscatlen, leaving the value raw-encoded.
+		data = object.MakeRawStringObject(bytes)
+	} else {
+		// Creating a fresh key goes through the same encoding pass as SET.
+		data = object.MakeStringObject(bytes)
+	}
+	db.PutEntity(key, &database.DataEntity{Data: data})
 	db.addAof(utils.ToCmdLine3("append", args...))
 	return protocol.MakeIntReply(int64(len(bytes)))
 }
@@ -711,6 +718,11 @@ func execSetRange(db *DB, args [][]byte) redis.Reply {
 	if err != nil {
 		return err
 	}
+	if len(value) == 0 {
+		// Redis returns the current length untouched: an empty replacement
+		// never modifies the value and never creates a missing key.
+		return protocol.MakeIntReply(int64(len(bytes)))
+	}
 	bytesLen := int64(len(bytes))
 	if bytesLen < offset {
 		diff := offset - bytesLen
@@ -727,7 +739,8 @@ func execSetRange(db *DB, args [][]byte) redis.Reply {
 		}
 	}
 	db.PutEntity(key, &database.DataEntity{
-		Data: object.MakeStringObject(bytes),
+		// SETRANGE always leaves the value raw, even below the embstr limit.
+		Data: object.MakeRawStringObject(bytes),
 	})
 	db.addAof(utils.ToCmdLine3("setRange", args...))
 	return protocol.MakeIntReply(int64(len(bytes)))
@@ -781,7 +794,7 @@ func execSetBit(db *DB, args [][]byte) redis.Reply {
 	bm := bitmap.FromBytes(bs)
 	former := bm.GetBit(offset)
 	bm.SetBit(offset, v)
-	db.PutEntity(key, &database.DataEntity{Data: object.MakeStringObject(bm.ToBytes())})
+	db.PutEntity(key, &database.DataEntity{Data: object.MakeRawStringObject(bm.ToBytes())})
 	db.addAof(utils.ToCmdLine3("setBit", args...))
 	return protocol.MakeIntReply(int64(former))
 }

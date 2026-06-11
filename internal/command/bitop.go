@@ -81,7 +81,7 @@ func execBitOp(db *DB, args [][]byte) redis.Reply {
 
 	resultBytes := result.ToBytes()
 
-	db.PutEntity(dest, &database.DataEntity{Data: object.MakeStringObject(resultBytes)})
+	db.PutEntity(dest, &database.DataEntity{Data: object.MakeRawStringObject(resultBytes)})
 	db.addAof(utils.ToCmdLine3("bitop", args...))
 	return protocol.MakeIntReply(int64(len(resultBytes)))
 }

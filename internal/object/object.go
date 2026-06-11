@@ -120,6 +120,17 @@ func MakeStringObject(b []byte) *Robj {
 	}
 }
 
+// MakeRawStringObject creates a string object that is always raw-encoded.
+// Redis keeps a value raw after in-place modifications (APPEND, SETRANGE,
+// SETBIT, BITFIELD, BITOP) regardless of its length or numeric form.
+func MakeRawStringObject(b []byte) *Robj {
+	return &Robj{
+		Type:     TypeString,
+		Encoding: EncRaw,
+		Ptr:      b,
+	}
+}
+
 // GetStringBytes returns the string value as bytes
 func (r *Robj) GetStringBytes() []byte {
 	switch r.Encoding {
