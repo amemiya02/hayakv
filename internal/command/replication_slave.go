@@ -131,35 +131,68 @@ func (server *Server) setupMaster() {
 			logger.Error(err)
 		}
 	}()
-	var configVersion int32
-	ctx, cancel := context.WithCancel(context.Background())
+
+	// configVersion identifies the replication target this goroutine serves.
+	// A later REPLICAOF (new target) or REPLICAOF NO ONE bumps configVersion,
+	// signaling this goroutine to stop retrying and exit.
 	server.slaveStatus.mutex.Lock()
-	server.slaveStatus.ctx = ctx
-	server.slaveStatus.cancel = cancel
-	configVersion = server.slaveStatus.configVersion
+	configVersion := server.slaveStatus.configVersion
 	server.slaveStatus.mutex.Unlock()
-	isFullReSync, err := server.connectWithMaster(configVersion)
-	if err != nil {
-		// connect failed, abort master
-		logger.Error(err)
-		server.slaveOfNone()
-		return
-	}
-	if isFullReSync {
-		err = server.loadMasterRDB(configVersion)
-		if err != nil {
-			// load failed, abort master
-			logger.Error(err)
-			server.slaveOfNone()
+
+	// Real Redis keeps trying its configured master: a single transient
+	// handshake failure must not abandon replication (which would flip the
+	// node back to a master via slaveOfNone). Retry until the target changes.
+	const retryInterval = 500 * time.Millisecond
+
+	for {
+		if server.replTargetChanged(configVersion) {
 			return
 		}
-	}
-	err = server.receiveAOF(ctx, configVersion)
-	if err != nil {
-		// full sync failed, abort
-		logger.Error(err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		server.slaveStatus.mutex.Lock()
+		server.slaveStatus.ctx = ctx
+		server.slaveStatus.cancel = cancel
+		server.slaveStatus.mutex.Unlock()
+
+		isFullReSync, err := server.connectWithMaster(configVersion)
+		if err != nil {
+			cancel()
+			if errors.Is(err, configChangedErr) || server.replTargetChanged(configVersion) {
+				return
+			}
+			logger.Error("replication setup failed, retrying: " + err.Error())
+			time.Sleep(retryInterval)
+			continue
+		}
+		if isFullReSync {
+			if err = server.loadMasterRDB(configVersion); err != nil {
+				cancel()
+				if errors.Is(err, configChangedErr) || server.replTargetChanged(configVersion) {
+					return
+				}
+				logger.Error("load master RDB failed, retrying: " + err.Error())
+				time.Sleep(retryInterval)
+				continue
+			}
+		}
+		// Connection established and synced. receiveAOF streams commands until
+		// the link drops or the config changes; steady-state reconnection is
+		// then handled by slaveCron, so this goroutine exits here.
+		if err = server.receiveAOF(ctx, configVersion); err != nil {
+			logger.Error(err)
+		}
 		return
 	}
+}
+
+// replTargetChanged reports whether the replication target this goroutine
+// serves is no longer current — either a newer REPLICAOF bumped configVersion
+// or REPLICAOF NO ONE cleared the master host.
+func (server *Server) replTargetChanged(configVersion int32) bool {
+	server.slaveStatus.mutex.Lock()
+	defer server.slaveStatus.mutex.Unlock()
+	return server.slaveStatus.configVersion != configVersion || server.slaveStatus.masterHost == ""
 }
 
 // dialMaster establishes a connection to the master.  When tls-replication is
@@ -194,13 +227,20 @@ func dialMaster(addr string) (net.Conn, error) {
 
 // connectWithMaster finishes handshake with master
 // returns: isFullReSync, error
-func (server *Server) connectWithMaster(configVersion int32) (bool, error) {
+func (server *Server) connectWithMaster(configVersion int32) (isFullReSync bool, err error) {
 	addr := server.slaveStatus.masterHost + ":" + strconv.Itoa(server.slaveStatus.masterPort)
 	conn, err := dialMaster(addr)
 	if err != nil {
-		server.slaveOfNone() // abort
 		return false, errors.New("connect master failed " + err.Error())
 	}
+	// Close the freshly dialed connection if the handshake fails before it is
+	// adopted into slaveStatus, so retries don't leak file descriptors.
+	adopted := false
+	defer func() {
+		if !adopted {
+			_ = conn.Close()
+		}
+	}()
 	masterChan := parser.ParseStream(conn)
 
 	// ping
@@ -219,9 +259,7 @@ func (server *Server) connectWithMaster(configVersion int32) (bool, error) {
 		if !strings.HasPrefix(reply.Error(), "NOAUTH") &&
 			!strings.HasPrefix(reply.Error(), "NOPERM") &&
 			!strings.HasPrefix(reply.Error(), "ERR operation not permitted") {
-			logger.Error("Error reply to PING from master: " + string(reply.ToBytes()))
-			server.slaveOfNone() // abort
-			return false, nil
+			return false, errors.New("error reply to PING from master: " + string(reply.ToBytes()))
 		}
 	}
 
@@ -230,16 +268,13 @@ func (server *Server) connectWithMaster(configVersion int32) (bool, error) {
 		req := protocol.MakeMultiBulkReply(cmdLine)
 		_, err := conn.Write(req.ToBytes())
 		if err != nil {
-			server.slaveOfNone() // abort
 			return errors.New("send failed " + err.Error())
 		}
 		resp := <-masterChan
 		if resp.Err != nil {
-			server.slaveOfNone() // abort
 			return errors.New("read response failed: " + resp.Err.Error())
 		}
 		if !protocol.IsOKReply(resp.Data) {
-			server.slaveOfNone() // abort
 			return errors.New("unexpected auth response: " + string(resp.Data.ToBytes()))
 		}
 		return nil
@@ -293,6 +328,9 @@ func (server *Server) connectWithMaster(configVersion int32) (bool, error) {
 	server.slaveStatus.masterConn = conn
 	server.slaveStatus.masterChan = masterChan
 	server.slaveStatus.lastRecvTime = time.Now()
+	// The connection is now owned by slaveStatus; its lifecycle is managed by
+	// stopSlaveWithMutex / close, so the deferred guard must not close it.
+	adopted = true
 	return server.psyncHandshake()
 }
 

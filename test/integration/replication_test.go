@@ -98,6 +98,40 @@ func TestReplicaofAlias(t *testing.T) {
 	pollGet(t, replica, "k1", "v1", 10*time.Second)
 }
 
+// TestReplicaofTransientFailureRetries verifies that pointing a replica at an
+// unreachable master does NOT abandon replication. A transient connect failure
+// must keep the configured target and retry (role stays slave), the way real
+// Redis does — rather than calling slaveOfNone and flipping back to role:master.
+// Regression test for the initial-handshake-failure flake in TestReplicaofAlias.
+func TestReplicaofTransientFailureRetries(t *testing.T) {
+	replicaAddr, stopReplica := startHayakvRepl(t, "")
+	defer stopReplica()
+
+	ctx := context.Background()
+	replica := redis.NewClient(&redis.Options{Addr: replicaAddr, Protocol: 2})
+	defer replica.Close()
+
+	// A free port with nothing listening: every connect attempt is refused.
+	deadPort := freePort(t)
+	if err := replica.Do(ctx, "REPLICAOF", "127.0.0.1", fmt.Sprintf("%d", deadPort)).Err(); err != nil {
+		t.Fatalf("REPLICAOF: %v", err)
+	}
+
+	// Across the retry window the replica must stay role:slave (still trying),
+	// never flipping back to role:master as the old abort-on-failure path did.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		info := replica.Info(ctx, "replication").Val()
+		if strings.Contains(info, "role:master") {
+			t.Fatalf("replica flipped to role:master on connect failure (should retry):\n%s", info)
+		}
+		if !strings.Contains(info, "role:slave") {
+			t.Fatalf("expected role:slave while retrying, got:\n%s", info)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func splitAddr(t *testing.T, addr string) (host, port string) {
 	t.Helper()
 	for i := len(addr) - 1; i >= 0; i-- {

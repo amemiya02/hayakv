@@ -230,19 +230,29 @@ setupMaster()
 任何步骤检测到 `configVersion` 变化（即用户执行了新的 `REPLICAOF`）就立即中止，
 防止「旧连接的 goroutine」在新连接建立后继续写数据。
 
-**psyncHandshake**（`replication_slave.go:301–315`）：
+`setupMaster`（`replication_slave.go:128`）外层是一个**重试循环**：握手或装载
+RDB 的瞬时失败（master 尚未就绪、连接被瞬断等）不会放弃复制，而是隔
+500ms 重试，直到目标改变——这与真实 Redis「副本持续尝试连接其配置的
+master」一致。判断目标是否仍然有效由 `replTargetChanged`（`replication_slave.go:192`）
+完成：只有新的 `REPLICAOF`（`configVersion` 改变）或 `REPLICAOF NO ONE`
+（`masterHost` 清空）才会让循环退出。早期实现里任何瞬时失败都会调用
+`slaveOfNone()` 把节点直接翻回 master 角色——这是一个会让「首次握手偶发失败」
+变成「复制被永久放弃」的隐藏缺陷，已修复（回归测试见
+`TestReplicaofTransientFailureRetries`）。
+
+**psyncHandshake**（`replication_slave.go:339–353`）：
 
 首次连接发 `PSYNC ? -1`（副本无历史），重连时发 `PSYNC <replId> <replOffset>`
 尝试部分重同步。
 
-**loadMasterRDB**（`replication_slave.go:374–422`）：
+**loadMasterRDB**（`replication_slave.go:412–460`）：
 
 - 从 masterChan 读到一个 `BulkReply`，内容是完整 RDB 字节。
 - 若 `appendonly` 开启，创建临时 AOF 文件与一个辅助 Server，把 RDB 解码并重放
   进去；解码完成后把临时 AOF 重命名为正式 AOF 文件，重绑 persister。
   这是本章关键差异点之一（见 3.5 节）。
 
-**receiveAOF**（`replication_slave.go:424–479`）：
+**receiveAOF**（`replication_slave.go:462–517`）：
 
 每条命令到来后，先统计字节数更新 `replOffset`，再区分 `REPLCONF GETACK`（立即
 发 ACK 并 continue 跳过执行）与普通写命令（调用 `server.Exec` 执行）。
