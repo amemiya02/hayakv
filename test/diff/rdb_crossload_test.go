@@ -161,12 +161,6 @@ func TestRDBCrossLoadRedisToHayakv(t *testing.T) {
 	if _, err := exec.LookPath("redis-server"); err != nil {
 		t.Skip("redis-server not on PATH; skipping redis->hayakv cross-load")
 	}
-	// Deferred to the "modern RDB encodings" milestone: Redis 8 writes its
-	// values with listpack / quicklist / intset encodings (RDB type bytes
-	// 11/16/17/18/20), which hayakv's faithful decoder does not yet parse — it
-	// only understands the legacy types (0-4). Decoding those is milestone-scale
-	// work tracked separately.
-	t.Skip("deferred: hayakv does not yet decode Redis 8 listpack/quicklist/intset RDB encodings")
 	tmp := t.TempDir()
 
 	// 1) redis writes dump.rdb (no compression -> no LZF in the output)
@@ -188,12 +182,30 @@ func TestRDBCrossLoadRedisToHayakv(t *testing.T) {
 	sendAndRead(t, rAddr, "SADD", "set", "x", "y")
 	sendAndRead(t, rAddr, "HSET", "hash", "f1", "v1")
 	sendAndRead(t, rAddr, "ZADD", "zset", "2", "m2")
+	sendAndRead(t, rAddr, "SADD", "nums", "1", "2", "3")     // intset encoding (type 11)
+	sendAndRead(t, rAddr, "ZADD", "big", "1", "a", "2", "b") // small zset -> zset-listpack
 	if got := sendAndRead(t, rAddr, "SAVE"); !bytes.Equal(got, []byte("+OK\r\n")) {
 		t.Fatalf("redis SAVE = %q", got)
 	}
 	if rcmd.Process != nil {
 		_ = rcmd.Process.Kill()
 		_, _ = rcmd.Process.Wait()
+	}
+
+	// hayakv reads dump.rdb from CWD (the filename has no dir prefix), so copy
+	// it out of the tmp dir that redis --dir wrote into.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	cwdDump := filepath.Join(cwd, "dump.rdb")
+	defer os.Remove(cwdDump)
+	srcData, err := os.ReadFile(filepath.Join(tmp, "dump.rdb"))
+	if err != nil {
+		t.Fatalf("read redis dump.rdb from tmp: %v", err)
+	}
+	if err := os.WriteFile(cwdDump, srcData, 0o644); err != nil {
+		t.Fatalf("copy dump.rdb to CWD: %v", err)
 	}
 
 	// 2) hayakv (faithful, appendonly OFF so it loads the rdb) boots on that dir
@@ -248,5 +260,11 @@ rdb-impl faithful
 	}
 	if got := sendAndRead(t, hAddr, "ZSCORE", "zset", "m2"); !bytes.Equal(got, []byte("$1\r\n2\r\n")) {
 		t.Fatalf("hayakv ZSCORE zset m2 = %q", got)
+	}
+	if got := sendAndRead(t, hAddr, "SCARD", "nums"); !bytes.Equal(got, []byte(":3\r\n")) {
+		t.Fatalf("hayakv SCARD nums = %q", got)
+	}
+	if got := sendAndRead(t, hAddr, "ZSCORE", "big", "b"); !bytes.Equal(got, []byte("$1\r\n2\r\n")) {
+		t.Fatalf("hayakv ZSCORE big b = %q", got)
 	}
 }
