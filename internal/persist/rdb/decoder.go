@@ -224,6 +224,14 @@ func (d *Decoder) readObject(typeByte byte, db int, expireMS uint64) (Entry, err
 			e.ZSetVal = append(e.ZSetVal, ZSetMember{Member: elems[i], Score: score})
 		}
 		return e, nil
+	case typeListQuicklist2:
+		vals, err := d.readQuicklist2()
+		if err != nil {
+			return e, err
+		}
+		e.Type = typeList
+		e.ListVal = vals
+		return e, nil
 	case typeStream:
 		sd, err := d.readStreamData()
 		if err != nil {
@@ -453,4 +461,38 @@ func (d *Decoder) readDouble() (float64, error) {
 		return 0, err
 	}
 	return math.Float64frombits(binary.LittleEndian.Uint64(b)), nil
+}
+
+// readQuicklist2 decodes RDB_TYPE_LIST_QUICKLIST_2: a node count followed by
+// per-node (container, blob) pairs. Container 1 = PLAIN (blob is a single
+// element); 2 = PACKED (blob is a listpack whose elements are list members).
+func (d *Decoder) readQuicklist2() ([][]byte, error) {
+	nodeCount, _, err := d.r.readLen()
+	if err != nil {
+		return nil, err
+	}
+	var out [][]byte
+	for i := uint64(0); i < nodeCount; i++ {
+		container, _, err := d.r.readLen()
+		if err != nil {
+			return nil, err
+		}
+		blob, err := d.r.readString()
+		if err != nil {
+			return nil, err
+		}
+		switch container {
+		case 1: // PLAIN
+			out = append(out, blob)
+		case 2: // PACKED listpack
+			elems, err := parseListpack(blob)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, elems...)
+		default:
+			return nil, fmt.Errorf("rdb: unknown quicklist container %d", container)
+		}
+	}
+	return out, nil
 }

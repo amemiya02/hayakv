@@ -94,3 +94,36 @@ func TestDecodeZSetListpack(t *testing.T) {
 		t.Fatalf("ZSetVal = %+v", e.ZSetVal)
 	}
 }
+
+func TestDecodeQuicklist2Packed(t *testing.T) {
+	// one PACKED node containing listpack ["a","b"]
+	lp := []byte{0x0D, 0, 0, 0, 0x02, 0x00, 0x81, 'a', 0x02, 0x81, 'b', 0x02, 0xFF}
+	var payload bytes.Buffer
+	payload.WriteByte(0x01) // nodeCount = 1
+	payload.WriteByte(0x02) // container = PACKED
+	payload.Write(rdbStr(lp))
+	e := decodeOne(t, modernFixture(typeListQuicklist2, "l", payload.Bytes()))
+	if e.Type != typeList {
+		t.Fatalf("Type = %d, want typeList(%d)", e.Type, typeList)
+	}
+	want := [][]byte{[]byte("a"), []byte("b")}
+	if !reflect.DeepEqual(e.ListVal, want) {
+		t.Fatalf("ListVal = %q, want %q", e.ListVal, want)
+	}
+}
+
+func TestDecodeQuicklist2PlainAndPacked(t *testing.T) {
+	// node 1: PLAIN "big" ; node 2: PACKED listpack ["c"]
+	lpC := []byte{0x0A, 0, 0, 0, 0x01, 0x00, 0x81, 'c', 0x02, 0xFF}
+	var payload bytes.Buffer
+	payload.WriteByte(0x02) // nodeCount = 2
+	payload.WriteByte(0x01) // container = PLAIN
+	payload.Write(rdbStr([]byte("big")))
+	payload.WriteByte(0x02) // container = PACKED
+	payload.Write(rdbStr(lpC))
+	e := decodeOne(t, modernFixture(typeListQuicklist2, "l", payload.Bytes()))
+	want := [][]byte{[]byte("big"), []byte("c")}
+	if !reflect.DeepEqual(e.ListVal, want) {
+		t.Fatalf("ListVal = %q, want %q", e.ListVal, want)
+	}
+}
