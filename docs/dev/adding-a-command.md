@@ -239,20 +239,13 @@ hayakv 的测试分四层，每层定位不同：
 ### 第一层：单元测试 + race 检测
 
 ```bash
-go test -race ./internal/command -run TestSetNX -count=1 -v
+go test -race ./internal/command -run TestSetNX -count=1 -v   # 先跑目标命令
+go test -race ./...                                           # 再全包跑，CI 必跑
 ```
 
 测试 handler 的逻辑正确性，开 `-race` 检测并发冲突。新命令在 `internal/command/<type>_test.go` 里写单测，参考 `string_test.go:123` 的 `TestSetNX`。
 
-### 第二层：全包 race 测试
-
-```bash
-go test -race ./...
-```
-
-覆盖所有包，验证没有数据竞争。CI 必跑。
-
-### 第三层：集成测试
+### 第二层：集成测试
 
 ```bash
 go test ./test/integration -count=1
@@ -260,7 +253,7 @@ go test ./test/integration -count=1
 
 启动真实的 hayakv 进程，用 `redis-cli` 和 `go-redis` 验证连通性与基本协议正确性。
 
-### 第四层：差分测试
+### 第三层：差分测试
 
 ```bash
 go test ./test/diff -count=1
@@ -274,13 +267,9 @@ HAYAKV_DIFF_REDIS_ADDR=127.0.0.1:6379 go test ./test/diff -count=1
 
 字节级对比所有语料命令。这是最终验收门，CI 必跑。
 
-### 第五层（可选）：TCL 测试
+### 第四层（可选）：TCL 测试
 
-```bash
-# test/tcl/ 提供了 TCL 测试运行器脚手架，参考 test/tcl/ 目录
-```
-
-TCL 套件目前是可选的，主要用于兼容 Redis 官方测试框架。
+TCL 套件对接 Redis 官方测试框架，目前是可选层——脚手架在 `test/tcl/`（`run_tcl.sh` + `manifest.yaml`）。
 
 ---
 
@@ -295,7 +284,7 @@ TCL 套件目前是可选的，主要用于兼容 Redis 官方测试框架。
 - [ ] **差分语料或排除清单**：新命令已加入某个 `corpus_*_test.go`，或在 `diffExclusions` 里给出理由；如新建语料函数，已把函数指针加入 `coverage_test.go:67` 的列表
 - [ ] **单元测试**：在对应 `_test.go` 文件里有覆盖 happy path 和边界的测试
 - [ ] **写命令调用了 `db.addAof`**（只读命令不需要）
-- [ ] `gofmt -l ./...` 无输出，`go vet ./...` 无告警
+- [ ] `gofmt -l $(find . -name '*.go' -type f)` 无输出，`go vet ./...` 无告警
 - [ ] 差分测试通过：`go test ./test/diff -run TestCorpusMentionsOrExcludesEveryRegisteredCommand -count=1` → `PASS`
 
 ---
