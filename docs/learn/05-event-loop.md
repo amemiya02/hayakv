@@ -158,7 +158,7 @@ internal/net/eventloop/
 ### 3.3 单线程事件循环主体
 
 ```go
-// internal/net/eventloop/server.go:81
+// internal/net/eventloop/server.go:80
 events := make([]event, maxEvents)   // 最多 128 个就绪事件/轮
 for {
     select {
