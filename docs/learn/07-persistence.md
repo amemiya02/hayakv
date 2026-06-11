@@ -13,7 +13,7 @@
 
 实际生产中两者通常同时开启：AOF 保证低丢失率，RDB 作为快速恢复的保底。从 Redis 7 起，**混合持久化**（`aof-use-rdb-preamble yes`）把 RDB 的快与 AOF 的全结合起来；**multi-part AOF**（manifest 布局）则解决了重写期间文件切换的原子性问题。
 
-hayakv 完整实现了上述所有机制，并额外提供了一个独特卖点：自有的 **faithful RDB 编解码器**（`rdb-impl faithful`），写出的文件与真实 Redis 8.x 逐字节互通。本章带你把原理和代码一一对应。
+hayakv 完整实现了上述所有机制，并额外提供了自有的 **faithful RDB 编解码器**（`rdb-impl faithful`）：它写出符合 Redis RDB v12 格式、能被真实 Redis 8.x 加载的文件。需要诚实说明能力边界：当前的 faithful 编解码器只覆盖**传统 RDB 类型**（string/list/set/hash/zset，类型字节 0–4），尚未实现 Redis 8 默认使用的 **listpack / quicklist / intset** 等现代编码的解码——因此「读取真实 Redis 8 写出的 RDB」这一方向还不完整，留作独立 milestone（见 2.8 节）。本章带你把原理和代码一一对应。
 
 ---
 
@@ -264,17 +264,12 @@ rdb/
 
 **TestRDBCrossLoadRedisToHayakv**：启动真实 Redis，写数据，`SAVE`，停机，hayakv（`appendonly no`，`rdb-impl faithful`）加载 Redis 写出的 `dump.rdb`，验证同样的查询。
 
-两个测试都在测试开头检查 `redis-server` 是否在 PATH，不存在则 `t.Skip`，所以在没有 Redis 的 CI 环境里会跳过而不是失败。在本文写作时（本机有 redis-server），这两个测试会运行但受其他已知问题影响（list RPUSH 去重 bug）：
+两个测试都在测试开头检查 `redis-server` 是否在 PATH，不存在则 `t.Skip`，所以在没有 Redis 的 CI 环境里会跳过而不是失败。**目前两个测试都被显式 `t.Skip`**，因为完整的双向 cross-load 依赖「现代 RDB 编码解码」这一未完成的 milestone：
 
-```
-$ go test ./test/diff/ -run TestRDBCrossLoad -v -count=1 -timeout 30s
---- FAIL: TestRDBCrossLoadHayakvToRedis (0.80s)
-    rdb_crossload_test.go:118: redis GET str = "$-1\r\n"
---- FAIL: TestRDBCrossLoadRedisToHayakv (0.81s)
-    rdb_crossload_test.go:209: hayakv LRANGE list = "*21\r\n..."
-```
+- **RedisToHayakv** 方向需要 hayakv 能解析 Redis 8 默认写出的 listpack / quicklist / intset 编码（RDB 类型字节 11/16/17/18/20）。早先看到的 `hayakv LRANGE list = "*27\r\n..."`（3 个元素被读成 27 个）正是 hayakv 把一个它不认识的 quicklist-listpack 容器误读的结果——不是 RPUSH 去重 bug，而是缺少现代编码解码器。
+- **HayakvToRedis** 方向中 hayakv 只写传统类型（0–4），真实 Redis 本可向后兼容地读取；但仍存在一处未解决的往返差异（某个 string key 被真实 Redis 读回 `nil`），一并随该 milestone 处理。
 
-注意：这是 hayakv 当前已知的兼容性 bug，不是持久化格式问题，RDB 文件格式本身已经字节级对齐（由 `TestRewriteMultiPart` 等单测证实：`string(data[:9]) == "REDIS0012"` 通过）。
+RDB 文件格式的版本头本身已字节级对齐（由 `TestRewriteMultiPart` 等单测证实：`string(data[:9]) == "REDIS0012"` 通过）；缺的是现代值编码的读路径，而非文件框架。
 
 ---
 
