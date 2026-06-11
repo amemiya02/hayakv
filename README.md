@@ -105,6 +105,11 @@ HAYAKV_DIFF_REDIS_ADDR=127.0.0.1:6379 go test ./test/diff
 
 If neither Docker nor `HAYAKV_DIFF_REDIS_ADDR` is available, the harness skips cleanly.
 
+## Documentation
+
+Developer guides (architecture, adding commands, testing, configuration) and a
+Redis-internals learning series (Chinese-first) live under [`docs/`](./docs/README.md).
+
 ## Out of scope
 
 The Redis 8 bundled module universe — JSON, the query engine (full-text + vector),

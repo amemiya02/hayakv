@@ -100,6 +100,11 @@ HAYAKV_DIFF_REDIS_ADDR=127.0.0.1:6379 go test ./test/diff
 
 Docker 和 `HAYAKV_DIFF_REDIS_ADDR` 都不可用时，测试会自动跳过。
 
+## 文档
+
+开发文档（架构、加命令、测试、配置）与 Redis 内核学习系列（中文）位于
+[`docs/`](./docs/README.md)。
+
 ## 不在范围内
 
 Redis 8 自带的模块体系——JSON、查询引擎（全文 + 向量）、TimeSeries 以及概率数据结构
