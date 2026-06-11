@@ -237,12 +237,12 @@ func TestHIncrBy(t *testing.T) {
 
 	key := utils.RandString(10)
 	result := testDB.Exec(nil, utils.ToCmdLine("hincrby", key, "a", "1"))
-	if bulkResult, _ := result.(*protocol.BulkReply); string(bulkResult.Arg) != "1" {
-		t.Errorf("expected %s, actually %s", "1", string(bulkResult.Arg))
+	if string(result.ToBytes()) != ":1\r\n" {
+		t.Errorf("expected :1, actually %s", string(result.ToBytes()))
 	}
 	result = testDB.Exec(nil, utils.ToCmdLine("hincrby", key, "a", "1"))
-	if bulkResult, _ := result.(*protocol.BulkReply); string(bulkResult.Arg) != "2" {
-		t.Errorf("expected %s, actually %s", "2", string(bulkResult.Arg))
+	if string(result.ToBytes()) != ":2\r\n" {
+		t.Errorf("expected :2, actually %s", string(result.ToBytes()))
 	}
 
 	result = testDB.Exec(nil, utils.ToCmdLine("hincrbyfloat", key, "b", "1.2"))

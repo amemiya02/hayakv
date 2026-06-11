@@ -63,6 +63,7 @@ jobs:
           go test -count=1 ./test/diff -run TestDifferentialRESP2
           go test -count=1 ./test/diff -run TestDifferentialRedisDB
           go test -count=1 ./test/diff -run TestDifferential8x
+          go test -count=1 ./test/diff -run TestDifferentialVariants
 
       - name: Build
         run: go build ./cmd/hayakv

@@ -74,8 +74,10 @@ func (db *DB) getOrInitBitmap(key string) (*bitmap.BitMap, bool, protocol.ErrorR
 func bfGet(bm *bitmap.BitMap, offset int64, bits int, signed bool) int64 {
 	var val int64
 	for i := 0; i < bits; i++ {
+		// Redis BITFIELD stores fields big-endian: the bit at offset+i is the
+		// (bits-1-i)-th most significant bit of the field value.
 		if bm.GetBit(offset+int64(i)) != 0 {
-			val |= 1 << i
+			val |= 1 << (bits - 1 - i)
 		}
 	}
 	// sign-extend if signed and negative
@@ -91,7 +93,8 @@ func bfSet(bm *bitmap.BitMap, offset int64, bits int, signed bool, val int64) in
 	mask := int64((1 << bits) - 1)
 	val &= mask
 	for i := 0; i < bits; i++ {
-		if val&(1<<i) != 0 {
+		// Big-endian: bit offset+i carries the (bits-1-i)-th MSB of the value.
+		if val&(1<<(bits-1-i)) != 0 {
 			bm.SetBit(offset+int64(i), 1)
 		} else {
 			bm.SetBit(offset+int64(i), 0)

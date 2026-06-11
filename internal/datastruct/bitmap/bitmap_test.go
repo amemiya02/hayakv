@@ -48,7 +48,8 @@ func TestFromBytes(t *testing.T) {
 	bs := []byte{0xff, 0xff}
 	bm := FromBytes(bs)
 	bm.SetBit(8, 0)
-	expect := []byte{0xff, 0xfe}
+	// MSB-first: offset 8 is the most significant bit of byte 1.
+	expect := []byte{0xff, 0x7f}
 	if !bytes.Equal(bs, expect) {
 		t.Error("wrong value")
 	}
@@ -123,7 +124,8 @@ func TestBitMap_ForEachByte(t *testing.T) {
 	}
 	bm.ForEachByte(0, 0, func(offset int64, val byte) bool {
 		if offset%2 == 0 {
-			if val != 1 {
+			// MSB-first: SetBit at a byte-aligned offset sets the high bit.
+			if val != 0x80 {
 				t.Error("wrong value")
 			}
 		} else {
@@ -135,7 +137,8 @@ func TestBitMap_ForEachByte(t *testing.T) {
 	})
 	bm.ForEachByte(0, 2000, func(offset int64, val byte) bool {
 		if offset%2 == 0 {
-			if val != 1 {
+			// MSB-first: SetBit at a byte-aligned offset sets the high bit.
+			if val != 0x80 {
 				t.Error("wrong value")
 			}
 		} else {
@@ -147,7 +150,8 @@ func TestBitMap_ForEachByte(t *testing.T) {
 	})
 	bm.ForEachByte(0, 500, func(offset int64, val byte) bool {
 		if offset%2 == 0 {
-			if val != 1 {
+			// MSB-first: SetBit at a byte-aligned offset sets the high bit.
+			if val != 0x80 {
 				t.Error("wrong value")
 			}
 		} else {

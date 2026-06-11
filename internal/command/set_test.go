@@ -75,7 +75,11 @@ func TestSPop(t *testing.T) {
 	}
 
 	result := testDB.Exec(nil, utils.ToCmdLine("spop", key))
-	asserts.AssertMultiBulkReplySize(t, result, 1)
+	// SPOP without a count returns a single bulk reply (the popped member),
+	// not an array; the popped value is random so only the shape is checked.
+	if _, ok := result.(*protocol.BulkReply); !ok {
+		t.Errorf("SPOP without count expected a bulk reply, got %s", result.ToBytes())
+	}
 
 	currentSize := size - 1
 	for currentSize > 0 {

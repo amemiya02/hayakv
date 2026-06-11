@@ -197,8 +197,10 @@ func variantCorpus() []Scenario {
 			{Args: []string{"HGETALL", "h"}},
 		}},
 		{Name: "hrandfield", Commands: []Command{
-			{Args: []string{"HSET", "h", "a", "1", "b", "2", "c", "3"}},
-			{Args: []string{"HRANDFIELD", "h", "2"}},
+			// 1-field hash + count > size returns just that field, avoiding the
+			// random field order that differs across servers.
+			{Args: []string{"HSET", "h", "a", "1"}},
+			{Args: []string{"HRANDFIELD", "h", "3"}},
 		}},
 		{Name: "hsetnx", Commands: []Command{
 			{Args: []string{"HSETNX", "h", "f", "v"}},
@@ -294,8 +296,10 @@ func variantCorpus() []Scenario {
 			{Args: []string{"SPOP", "s"}},
 		}},
 		{Name: "srandmember", Commands: []Command{
-			{Args: []string{"SADD", "s", "a", "b", "c"}},
-			{Args: []string{"SRANDMEMBER", "s", "2"}},
+			// 1-element set + count > cardinality returns just that member,
+			// avoiding the random element order that differs across servers.
+			{Args: []string{"SADD", "s", "a"}},
+			{Args: []string{"SRANDMEMBER", "s", "3"}},
 		}},
 		{Name: "sunion", Commands: []Command{
 			{Args: []string{"SADD", "s1", "a", "b"}},
@@ -382,27 +386,29 @@ func variantCorpus() []Scenario {
 		{Name: "expiretime", Commands: []Command{
 			{Args: []string{"SET", "k", "v"}},
 			{Args: []string{"EXPIRE", "k", "600"}},
-			{Args: []string{"EXPIRETIME", "k"}},
+			// Absolute/relative expiry replies are wall-clock dependent; clamp
+			// any positive value so the two servers compare equal.
+			{Args: []string{"EXPIRETIME", "k"}, Normalize: normalizeTTL},
 		}},
 		{Name: "pexpire", Commands: []Command{
 			{Args: []string{"SET", "k", "v"}},
 			{Args: []string{"PEXPIRE", "k", "600000"}},
-			{Args: []string{"PTTL", "k"}},
+			{Args: []string{"PTTL", "k"}, Normalize: normalizeTTL},
 		}},
 		{Name: "pexpireat", Commands: []Command{
 			{Args: []string{"SET", "k", "v"}},
 			{Args: []string{"PEXPIREAT", "k", "2000000000000"}},
-			{Args: []string{"PTTL", "k"}},
+			{Args: []string{"PTTL", "k"}, Normalize: normalizeTTL},
 		}},
 		{Name: "pexpiretime", Commands: []Command{
 			{Args: []string{"SET", "k", "v"}},
 			{Args: []string{"PEXPIRE", "k", "600000"}},
-			{Args: []string{"PEXPIRETIME", "k"}},
+			{Args: []string{"PEXPIRETIME", "k"}, Normalize: normalizeTTL},
 		}},
 		{Name: "pttl", Commands: []Command{
 			{Args: []string{"SET", "k", "v"}},
 			{Args: []string{"PEXPIRE", "k", "600000"}},
-			{Args: []string{"PTTL", "k"}},
+			{Args: []string{"PTTL", "k"}, Normalize: normalizeTTL},
 		}},
 		// --- bit variants ---
 		{Name: "getbit", Commands: []Command{

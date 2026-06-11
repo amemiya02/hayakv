@@ -38,7 +38,9 @@ func (b *BitMap) ToBytes() []byte {
 
 func (b *BitMap) SetBit(offset int64, val byte) {
 	byteIndex := offset / 8
-	bitOffset := offset % 8
+	// Redis numbers bits MSB-first: bit offset 0 is the most significant bit of
+	// byte 0, so the in-byte shift is 7-(offset%8).
+	bitOffset := 7 - (offset % 8)
 	mask := byte(1 << bitOffset)
 	b.grow(offset + 1)
 	if val > 0 {
@@ -52,7 +54,7 @@ func (b *BitMap) SetBit(offset int64, val byte) {
 
 func (b *BitMap) GetBit(offset int64) byte {
 	byteIndex := offset / 8
-	bitOffset := offset % 8
+	bitOffset := 7 - (offset % 8)
 	if byteIndex >= int64(len(*b)) {
 		return 0
 	}
@@ -68,7 +70,8 @@ func (b *BitMap) ForEachBit(begin int64, end int64, cb Callback) {
 	for byteIndex < int64(len(*b)) {
 		b := (*b)[byteIndex]
 		for bitOffset < 8 {
-			bit := byte(b >> bitOffset & 0x01)
+			// MSB-first: the bit for this offset is at shift 7-bitOffset.
+			bit := byte(b >> (7 - bitOffset) & 0x01)
 			if !cb(offset, bit) {
 				return
 			}

@@ -249,7 +249,7 @@ services:
 | **Command race tests** | `go test -race -count=1 ./internal/command -timeout 10m`（`GOMEMLIMIT=5GiB`） | 命令层单独跑，内存限制 5 GiB |
 | **Integration tests** | `go test -count=1 ./test/integration` | 全集成测试 |
 | **Replication tests** | `go test -count=1 -p 1 ./test/integration -run 'TestReplica\|TestReplconf\|...'` | 复制专项，串行执行（`-p 1`） |
-| **Differential tests** | `go test -count=1 ./test/diff -run TestDifferentialRESP2`<br>`go test -count=1 ./test/diff -run TestDifferentialRedisDB`<br>`go test -count=1 ./test/diff -run TestDifferential8x` | 三个主差分语料 |
+| **Differential tests** | `go test -count=1 ./test/diff -run TestDifferentialRESP2`<br>`go test -count=1 ./test/diff -run TestDifferentialRedisDB`<br>`go test -count=1 ./test/diff -run TestDifferential8x`<br>`go test -count=1 ./test/diff -run TestDifferentialVariants` | 四个主差分语料（含命令变体） |
 | **Build** | `go build ./cmd/hayakv` | 最终构建验证 |
 
 > **注意**：`gofmt` 和 `go vet` 在本地提交前应主动运行，格式问题会直接阻断 CI。

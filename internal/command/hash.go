@@ -430,7 +430,7 @@ func execHIncrBy(db *DB, args [][]byte) redis.Reply {
 	if !exists {
 		hash.Put(field, args[2])
 		db.addAof(utils.ToCmdLine3("hincrby", args...))
-		return protocol.MakeBulkReply(args[2])
+		return protocol.MakeIntReply(delta)
 	}
 	val, err := strconv.ParseInt(string(toBytes(value)), 10, 64)
 	if err != nil {
@@ -440,7 +440,7 @@ func execHIncrBy(db *DB, args [][]byte) redis.Reply {
 	bytes := []byte(strconv.FormatInt(val, 10))
 	hash.Put(field, bytes)
 	db.addAof(utils.ToCmdLine3("hincrby", args...))
-	return protocol.MakeBulkReply(bytes)
+	return protocol.MakeIntReply(val)
 }
 
 func undoHIncr(db *DB, args [][]byte) []CmdLine {

@@ -206,8 +206,16 @@ func execSPop(db *DB, args [][]byte) redis.Reply {
 		result[i] = []byte(v)
 	}
 
-	if count > 0 {
+	if len(result) > 0 {
 		db.addAof(utils.ToCmdLine3("spop", args...))
+	}
+	// SPOP key (no count) returns a single bulk string, or nil when the set is
+	// empty; only the SPOP key count form returns an array.
+	if len(args) == 1 {
+		if len(result) == 0 {
+			return &protocol.NullBulkReply{}
+		}
+		return protocol.MakeBulkReply(result[0])
 	}
 	return protocol.MakeMultiBulkReply(result)
 }
