@@ -13,7 +13,7 @@
 
 实际生产中两者通常同时开启：AOF 保证低丢失率，RDB 作为快速恢复的保底。从 Redis 7 起，**混合持久化**（`aof-use-rdb-preamble yes`）把 RDB 的快与 AOF 的全结合起来；**multi-part AOF**（manifest 布局）则解决了重写期间文件切换的原子性问题。
 
-hayakv 完整实现了上述所有机制，并额外提供了自有的 **faithful RDB 编解码器**（`rdb-impl faithful`）：它写出符合 Redis RDB v12 格式、能被真实 Redis 8.x 加载的文件。需要诚实说明能力边界：当前的 faithful 编解码器只覆盖**传统 RDB 类型**（string/list/set/hash/zset，类型字节 0–4），尚未实现 Redis 8 默认使用的 **listpack / quicklist / intset** 等现代编码的解码——因此「读取真实 Redis 8 写出的 RDB」这一方向还不完整，留作独立 milestone（见 2.8 节）。本章带你把原理和代码一一对应。
+hayakv 完整实现了上述所有机制，并额外提供了自有的 **faithful RDB 编解码器**（`rdb-impl faithful`）：它写出符合 Redis RDB v11 格式（`REDIS0011`）、能被真实 Redis 8.x 加载的文件。hayakv 现在**能解码**真实 Redis 8 写出的现代紧凑编码：listpack（hash/zset/set）、intset、quicklist-2、ZSET_2 二进制 double——解码后归一化为逻辑类型再重放，物理编码不保留（hayakv 根据自身的 `*-max-listpack-*` 阈值在加载后重新选择编码）。写路径仍然只写传统类型 0–4，保证向后兼容。双向 cross-load 测试（hayakv ↔ Redis）已在 CI 中启用（见 2.8 节）。本章带你把原理和代码一一对应。
 
 ---
 
@@ -264,12 +264,32 @@ rdb/
 
 **TestRDBCrossLoadRedisToHayakv**：启动真实 Redis，写数据，`SAVE`，停机，hayakv（`appendonly no`，`rdb-impl faithful`）加载 Redis 写出的 `dump.rdb`，验证同样的查询。
 
-两个测试都在测试开头检查 `redis-server` 是否在 PATH，不存在则 `t.Skip`，所以在没有 Redis 的 CI 环境里会跳过而不是失败。**目前两个测试都被显式 `t.Skip`**，因为完整的双向 cross-load 依赖「现代 RDB 编码解码」这一未完成的 milestone：
+两个测试都在测试开头检查 `redis-server` 是否在 PATH，不存在则 `t.Skip`，所以在没有 Redis 的 CI 环境里会跳过而不是失败。**两个测试现已启用**，CI 中作为独立 step 运行（`go test -count=1 ./test/diff -run TestRDBCrossLoad`）。
 
-- **RedisToHayakv** 方向需要 hayakv 能解析 Redis 8 默认写出的 listpack / quicklist / intset 编码（RDB 类型字节 11/16/17/18/20）。早先看到的 `hayakv LRANGE list = "*27\r\n..."`（3 个元素被读成 27 个）正是 hayakv 把一个它不认识的 quicklist-listpack 容器误读的结果——不是 RPUSH 去重 bug，而是缺少现代编码解码器。
-- **HayakvToRedis** 方向中 hayakv 只写传统类型（0–4），真实 Redis 本可向后兼容地读取；但仍存在一处未解决的往返差异（某个 string key 被真实 Redis 读回 `nil`），一并随该 milestone 处理。
+hayakv 解码真实 Redis 8 现代编码的方式：解码器将 listpack、intset、quicklist-2、ZSET_2 等物理编码归一化为逻辑类型（string/list/set/hash/zset 的成员与分数），然后通过 `LoadEntriesAsCommands` 重放为 `SET`/`RPUSH`/`SADD`/`HSET`/`ZADD` 命令——物理编码不保留，hayakv 根据自身的 `*-max-listpack-*` 阈值在加载后重新选择编码。
 
-RDB 文件格式的版本头本身已字节级对齐（由 `TestRewriteMultiPart` 等单测证实：`string(data[:9]) == "REDIS0012"` 通过）；缺的是现代值编码的读路径，而非文件框架。
+**写路径**仍然只输出传统 RDB 类型 0–4，文件头版本为 `REDIS0011`（RDB_VERSION 11，Redis 8.x stable），真实 Redis 可以向后兼容地加载。
+
+### 2.9 现代 RDB 编码字节布局速览
+
+**listpack**（RDB 类型 11/16/17/18/20 对应 hash/zset/set/list 的容器编码）：
+
+```
+[total: uint16 LE][num-elements: uint16 LE]   ← 6 字节头部（实际为 4 字节 total + 2 字节 num）
+[element...]                                   ← 变长元素：7-bit/6-bit/13-bit/12-bit/32-bit 或 int16–int64
+[backlen: 1–5 bytes]                           ← 每个元素末尾的反向长度
+0xFF                                           ← 终止符
+```
+
+**intset**（RDB 类型 11 的 set 编码，成员全为整数时）：
+
+```
+[encoding: uint32 LE]   ← 2/4/8，决定每个整数的字节宽度
+[length: uint32 LE]     ← 元素个数
+[int0, int1, ...]       ← N 个有符号小端整数
+```
+
+**已知限制**：hayakv 不写 LZF 压缩字符串（crossload 测试使用 `--rdbcompression no` 避免）；不支持 ziplist、zipmap、旧版 quicklist、hash-field-TTL 等遗留编码。stream 磁盘类型字节从 20 改为私有 200，以腾出 `SET_LISTPACK=20`——旧 hayakv RDB 中含有 stream 的文件不向前兼容。
 
 ---
 

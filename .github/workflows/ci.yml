@@ -65,5 +65,8 @@ jobs:
           go test -count=1 ./test/diff -run TestDifferential8x
           go test -count=1 ./test/diff -run TestDifferentialVariants
 
+      - name: RDB cross-load (redis<->hayakv)
+        run: go test -count=1 ./test/diff -run TestRDBCrossLoad
+
       - name: Build
         run: go build ./cmd/hayakv

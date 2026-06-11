@@ -131,8 +131,8 @@ TestObjectEncodingList         # List 编码
 TestObjectEncodingNonExistent  # 不存在键
 TestObjectEncodingSet          # Set 编码
 TestObjectEncodingSortedSet    # ZSet 编码
-TestRDBCrossLoadHayakvToRedis  # RDB 跨加载
-TestRDBCrossLoadRedisToHayakv  # RDB 跨加载（反向）
+TestRDBCrossLoadHayakvToRedis  # RDB 跨加载（hayakv→Redis）
+TestRDBCrossLoadRedisToHayakv  # RDB 跨加载（Redis→hayakv）
 TestCorpusMentionsOrExcludesEveryRegisteredCommand  # 覆盖强制（见 §3）
 ```
 
@@ -250,6 +250,7 @@ services:
 | **Integration tests** | `go test -count=1 ./test/integration` | 全集成测试 |
 | **Replication tests** | `go test -count=1 -p 1 ./test/integration -run 'TestReplica\|TestReplconf\|...'` | 复制专项，串行执行（`-p 1`） |
 | **Differential tests** | `go test -count=1 ./test/diff -run TestDifferentialRESP2`<br>`go test -count=1 ./test/diff -run TestDifferentialRedisDB`<br>`go test -count=1 ./test/diff -run TestDifferential8x`<br>`go test -count=1 ./test/diff -run TestDifferentialVariants` | 四个主差分语料（含命令变体） |
+| **RDB cross-load** | `go test -count=1 ./test/diff -run TestRDBCrossLoad` | hayakv ↔ Redis 双向 RDB 加载验证；依赖 `redis-server` 8.x 在 PATH，无则 clean-skip |
 | **Build** | `go build ./cmd/hayakv` | 最终构建验证 |
 
 > **注意**：`gofmt` 和 `go vet` 在本地提交前应主动运行，格式问题会直接阻断 CI。
