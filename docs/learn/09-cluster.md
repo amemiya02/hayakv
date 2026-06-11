@@ -219,7 +219,7 @@ func Key2Slot(key string) uint16 {
 
 三个边界情况都被覆盖：无 tag、空 tag `{}`、无闭合 `{`——与 Redis 源码 `keyHashSlot`
 行为完全一致，差分测试逐字节验证（`corpus_cluster_test.go` 的
-`"cluster keyslot hash tag"` 场景）。
+`"keyslot hash tag"` 与 `"keyslot hash tag edge cases"` 场景）。
 
 ### 3.2 `node.go`：集群拓扑数据结构
 
@@ -404,15 +404,16 @@ PFAIL 报告不算数），`quorum = 多数派 = masterCount/2 + 1`。一旦达�
 
 ### 3.10 差分语料佐证
 
-`test/diff/corpus_cluster_test.go` 中的 `clusterCorpus()` 函数包含以下场景，
-用来保证 hayakv 的输出与真实 Redis 8 逐字节一致：
+`test/diff/corpus_cluster_test.go` 中的 `clusterCorpus()` 函数聚焦于
+**`CLUSTER KEYSLOT`**——它是纯 `CRC16(key) mod 16384` 加 hash tag 提取，
+不依赖节点 id、端口或 epoch，因此能与真实 Redis 8 逐字节对拍：纯 key、空 key、
+hash tag、空 tag `{}`、首个非空 tag 优先、以及 tag 等价性等场景全部覆盖。
 
-- `cluster keyslot foo`、`cluster keyslot {user1000}.following`、
-  `cluster keyslot ""`——验证 CRC16 计算与 hash tag 边界情况。
-- `cluster myid`、`cluster info empty`、`cluster nodes empty`、
-  `cluster slots empty`、`cluster shards empty`——验证状态类输出格式。
-- `cluster addslotsrange`、`cluster countkeysinslot empty`、
-  `cluster getkeyinslot empty`——验证 slot 分配与 key 枚举接口。
+而 `CLUSTER MYID / NODES / INFO / SLOTS / SHARDS / ADDSLOTSRANGE /
+COUNTKEYSINSLOT / GETKEYSINSLOT` 的回复内嵌随机节点 id、各实例不同的端口与
+epoch，**天生无法逐字节对拍**，因此不放进差分语料，改由
+`internal/rediscluster/` 的单元测试覆盖——这正是第 10 章"非确定性是逐字节
+比较的天敌"的一个实例。
 
 ---
 
@@ -494,17 +495,19 @@ go test -race ./internal/rediscluster/ -count=1
 覆盖了 gossip 握手、PFAIL 传播、FAIL 接受、MIGRATING/ASK、IMPORTING/ASKING、
 MOVED/CROSSSLOT/keyless 路由等全部主路径，15 个用例全部通过。
 
-**差分测试（需 Docker/Redis 8）**
+**差分测试（需本地 `redis-server` 或 Docker）**
 
-`clusterCorpus()` 函数已定义（`test/diff/corpus_cluster_test.go`）但尚未挂载到
-独立的 `TestDifferentialXxx` 函数——目前由 `TestDifferential8x` 的覆盖率守卫统一
-保障。如有 Redis 8 实例可用：
+`clusterCorpus()` 由 `TestDifferentialCluster`（`test/diff/harness_cluster_test.go`）
+驱动：它在两侧各启动一个**开启了集群模式**的服务端（hayakv `cluster-enable yes`
++ 真实 `redis-server --cluster-enabled yes`），对 `CLUSTER KEYSLOT` 逐字节对拍。
+集群模式要求端口 ≤ 55535（gossip 总线 = 端口 + 10000，须落在 uint16 内），
+harness 用专门的 `freeClusterPort` 选端口。
 
 ```bash
-HAYAKV_DIFF_REDIS_ADDR=127.0.0.1:6379 go test ./test/diff -run TestDifferential8x -count=1
+go test ./test/diff -run TestDifferentialCluster -count=1 -v
 ```
 
-无 Redis 8 时测试会跳过（skip）并给出提示，不视为失败。
+本机若既无 `redis-server` 也无 Docker，测试会干净跳过（skip），不视为失败。
 
 ---
 

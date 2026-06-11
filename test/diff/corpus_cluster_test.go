@@ -1,45 +1,47 @@
 package diff
 
-// clusterCorpus returns scenarios that exercise Redis Cluster commands:
-// CLUSTER KEYSLOT, MYID, INFO, NODES, SLOTS, SHARDS, ADDSLOTS,
-// ADDSLOTSRANGE, COUNTKEYSINSLOT, GETKEYSINSLOT, CROSSSLOT errors,
-// and MOVED redirects.
+// clusterCorpus exercises the deterministic, node-identity-independent slice of
+// the Redis Cluster command surface: CLUSTER KEYSLOT. KEYSLOT is pure
+// CRC16(key) mod 16384 with hash-tag extraction, so its reply is byte-for-byte
+// identical between hayakv and real Redis regardless of node id, port, epoch or
+// slot assignment. It is run by TestDifferentialCluster (see
+// harness_cluster_test.go), which spins up cluster-enabled servers on both
+// sides.
+//
+// The introspection and slot-management commands (CLUSTER MYID / NODES / INFO /
+// SLOTS / SHARDS / ADDSLOTSRANGE / COUNTKEYSINSLOT / GETKEYSINSLOT) are
+// intentionally excluded from byte-for-byte diffing: their replies embed random
+// node ids, instance-specific ports, and epochs that differ between any two
+// servers. They are covered by the internal/rediscluster unit tests instead.
 func clusterCorpus() []Scenario {
 	return []Scenario{
-		// --- Pure cluster introspection (no slots needed) ---
-		{Name: "cluster keyslot foo", Commands: []Command{
+		{Name: "keyslot plain keys", Commands: []Command{
 			{Args: []string{"CLUSTER", "KEYSLOT", "foo"}},
+			{Args: []string{"CLUSTER", "KEYSLOT", "bar"}},
+			{Args: []string{"CLUSTER", "KEYSLOT", "baz"}},
+			{Args: []string{"CLUSTER", "KEYSLOT", "123456789"}},
+			{Args: []string{"CLUSTER", "KEYSLOT", "Hello World"}},
 		}},
-		{Name: "cluster keyslot hash tag", Commands: []Command{
-			{Args: []string{"CLUSTER", "KEYSLOT", "{user1000}.following"}},
-		}},
-		{Name: "cluster keyslot empty", Commands: []Command{
+		{Name: "keyslot empty key", Commands: []Command{
 			{Args: []string{"CLUSTER", "KEYSLOT", ""}},
 		}},
-		{Name: "cluster myid", Commands: []Command{
-			{Args: []string{"CLUSTER", "MYID"}},
+		{Name: "keyslot hash tag", Commands: []Command{
+			{Args: []string{"CLUSTER", "KEYSLOT", "{user1000}.following"}},
+			{Args: []string{"CLUSTER", "KEYSLOT", "{user1000}.followers"}},
+			{Args: []string{"CLUSTER", "KEYSLOT", "a{b}c"}},
 		}},
-		{Name: "cluster info empty", Commands: []Command{
-			{Args: []string{"CLUSTER", "INFO"}},
+		{Name: "keyslot hash tag edge cases", Commands: []Command{
+			// Empty tag "{}" hashes the whole key.
+			{Args: []string{"CLUSTER", "KEYSLOT", "{}foo"}},
+			{Args: []string{"CLUSTER", "KEYSLOT", "foo{}{bar}"}},
+			// First non-empty "{...}" wins.
+			{Args: []string{"CLUSTER", "KEYSLOT", "x{}{y}"}},
 		}},
-		{Name: "cluster nodes empty", Commands: []Command{
-			{Args: []string{"CLUSTER", "NODES"}},
-		}},
-		{Name: "cluster slots empty", Commands: []Command{
-			{Args: []string{"CLUSTER", "SLOTS"}},
-		}},
-		{Name: "cluster shards empty", Commands: []Command{
-			{Args: []string{"CLUSTER", "SHARDS"}},
-		}},
-		// --- Slot assignment and key routing ---
-		{Name: "cluster addslotsrange", Commands: []Command{
-			{Args: []string{"CLUSTER", "ADDSLOTSRANGE", "0", "8191"}},
-		}},
-		{Name: "cluster countkeysinslot empty", Commands: []Command{
-			{Args: []string{"CLUSTER", "COUNTKEYSINSLOT", "0"}},
-		}},
-		{Name: "cluster getkeyinslot empty", Commands: []Command{
-			{Args: []string{"CLUSTER", "GETKEYSINSLOT", "0", "10"}},
+		{Name: "keyslot hash tag equivalence", Commands: []Command{
+			// All three map to the slot of "u".
+			{Args: []string{"CLUSTER", "KEYSLOT", "{u}.a"}},
+			{Args: []string{"CLUSTER", "KEYSLOT", "{u}.b"}},
+			{Args: []string{"CLUSTER", "KEYSLOT", "{u}"}},
 		}},
 	}
 }
