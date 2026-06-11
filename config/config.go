@@ -44,7 +44,6 @@ type ServerProperties struct {
 	ReplTimeout       int    `cfg:"repl-timeout"`
 	ReplBacklogSize   int64  `cfg:"repl-backlog-size"`
 	ReplDisklessSync  bool   `cfg:"repl-diskless-sync"`
-	UseGnet           bool   `cfg:"use-gnet"`
 
 	NetBackend    string `cfg:"net"`
 	EngineBackend string `cfg:"engine"`

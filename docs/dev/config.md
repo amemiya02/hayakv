@@ -169,7 +169,6 @@ list 没有单值长度维度（与真实 Redis 行为一致）。这些键在�
 | `tls-key-file` | 文件路径 | `""` | TLS 服务端私钥文件 |
 | `tls-ca-cert-file` | 文件路径 | `""` | TLS CA 证书文件（用于客户端证书验证） |
 | `tls-replication` | `yes` \| `no` | `no` | 复制链路启用 TLS |
-| `use-gnet` | `yes` \| `no` | `no` | 遗留 gnet 后端开关（godis 残留，当前不推荐） |
 
 ---
 

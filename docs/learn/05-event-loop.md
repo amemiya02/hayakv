@@ -280,14 +280,14 @@ flowchart TD
     expireCheck["expireBlockedClients\n扫描超时 BLPOP/BRPOP/XREAD"] --> loop
 ```
 
-### 3.5 gnet 的状态
+### 3.5 已移除的 gnet 后端
 
-`internal/net/gnet/` 是 godis 遗留下来的基于第三方库
-[panjf2000/gnet](https://github.com/panjf2000/gnet) 的网络后端。对应的配置键是
-`use-gnet`（`config/config.go:47`），但 `internal/server/backends.go` 中的工厂
-函数**并未引用该包**，即 `use-gnet` 目前处于未接线状态——配置解析保留了字段，但
-无法通过标准启动路径激活。该包的测试也存在已知数据竞争（godis 原始缺陷），与本
-项目的新后端设计无关。
+历史上 `internal/net/gnet/` 曾是 godis 遗留的、基于第三方库
+[panjf2000/gnet](https://github.com/panjf2000/gnet) 的网络后端，由配置键
+`use-gnet` 控制。但 `internal/server/backends.go` 的工厂函数从未引用它——`use-gnet`
+是一个永远不会被读取的"死配置键"，整个包也无法通过标准启动路径激活。它因此被
+整体删除：包、`use-gnet` 字段、以及 `go.mod` 中的 `panjf2000/gnet` 依赖均已移除。
+hayakv 的两个网络后端就是本章讲的 goroutine 与 eventloop。
 
 ---
 
@@ -339,10 +339,9 @@ kill $EL_PID
 rm -f /tmp/hayakv-el.conf hayakv
 ```
 
-> **注意**：`go test -race ./internal/net/...` 会包含 `internal/net/gnet/` 和
-> `internal/net/goroutine/tcp/`，这两个包存在来自 godis 的已知数据竞争，与
-> eventloop 无关。如需只验证 eventloop 包，使用
-> `go test -race ./internal/net/eventloop/...`。
+> **注意**：`go test -race ./internal/net/...` 会包含 `internal/net/goroutine/tcp/`，
+> 该包存在来自 godis 的已知数据竞争，与 eventloop 无关。如需只验证 eventloop 包，
+> 使用 `go test -race ./internal/net/eventloop/...`。
 
 ---
 
