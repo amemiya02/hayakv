@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 )
 
@@ -371,4 +372,14 @@ func (d *Decoder) verifyCRC() error {
 		return fmt.Errorf("rdb: crc mismatch stored=%#016x computed=%#016x", stored, expected)
 	}
 	return nil
+}
+
+// readDouble reads an 8-byte little-endian IEEE-754 double (RDB_TYPE_ZSET_2
+// binary score, matching Redis rdbLoadBinaryDoubleValue).
+func (d *Decoder) readDouble() (float64, error) {
+	b, err := d.r.readFull(8)
+	if err != nil {
+		return 0, err
+	}
+	return math.Float64frombits(binary.LittleEndian.Uint64(b)), nil
 }

@@ -2,6 +2,8 @@ package rdb
 
 import (
 	"bytes"
+	"encoding/binary"
+	"math"
 	"reflect"
 	"testing"
 )
@@ -76,5 +78,18 @@ func TestDecoderRejectsBadCRC(t *testing.T) {
 	err := dec.Parse(func(Entry) bool { return true })
 	if err == nil {
 		t.Fatal("expected CRC mismatch error")
+	}
+}
+
+func TestReadDouble(t *testing.T) {
+	var b [8]byte
+	binary.LittleEndian.PutUint64(b[:], math.Float64bits(3.5))
+	d := NewDecoder(bytes.NewReader(b[:]))
+	got, err := d.readDouble()
+	if err != nil {
+		t.Fatalf("readDouble: %v", err)
+	}
+	if got != 3.5 {
+		t.Fatalf("got %v, want 3.5", got)
 	}
 }
