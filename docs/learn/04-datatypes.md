@@ -52,7 +52,7 @@ listpack，节点之间用双向链表相连——既保留了 listpack 的内�
 hayakv 的 `internal/datastruct/list/quicklist.go` 实现的是一个「页式」变体：
 每个链表节点是一个固定容量（`pageSize = 1024`）的 `[]interface{}` 切片，节点
 之间用 `container/list` 双向链表串联。逻辑等价，但不存储 listpack；迭代和
-随机访问通过 `iterator`（`quicklist.go:14`）实现，先定位到正确的页，再定位
+随机访问通过 `iterator`（`quicklist.go:16`）实现，先定位到正确的页，再定位
 页内偏移。
 
 ### 2.4 zset 的双结构设计
@@ -65,10 +65,10 @@ skiplist: 按 score 排序的链表  O(log N) 范围查询（ZRANGE、ZRANGEBYSC
 ```
 
 二者指向同一份 `Element`（member + score），因此写操作需同时更新两处
-（`sortedset/sortedset.go:25-38`）：
+（`sortedset/sortedset.go:24-38`）：
 
 ```go
-// internal/datastruct/sortedset/sortedset.go:25
+// internal/datastruct/sortedset/sortedset.go:24
 func (sortedSet *SortedSet) Add(member string, score float64) bool {
     element, ok := sortedSet.dict[member]
     sortedSet.dict[member] = &Element{Member: member, Score: score}
@@ -158,7 +158,7 @@ func (h *Hash) maybeConvertToHashtable() {
 `isListpack = false`，`listpack = nil`。**转换后 listpack 指针被清空，结构
 不可逆。**
 
-命令层（`internal/command/hash.go:88-97`）在 `getOrInitHash` 中创建 Hash 时
+命令层（`internal/command/hash.go:89-96`）在 `getOrInitHash` 中创建 Hash 时
 初始编码写入 Robj：
 
 ```go
@@ -289,7 +289,7 @@ hayakv 的 `QuickList`（`datastruct/list/quicklist.go`）是页式实现：
 
 ### 3.6 阈值从哪来
 
-配置键在 `example.conf` 第 94-108 行定义，默认值如下（均为注释掉的示例）：
+配置键在 `example.conf` 第 92-105 行定义，默认值如下（均为注释掉的示例）：
 
 ```
 hash-max-listpack-entries 128

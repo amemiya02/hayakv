@@ -92,7 +92,12 @@ redis-cli -p 6399 ping       # PONG
 
 ## ENCODINGS — 紧凑编码阈值
 
-与真实 Redis 8 相同语义和默认值：超过阈值自动转换为 hashtable/skiplist。
+阈值语义与真实 Redis 8 一致：超过阈值即转换为 hashtable/skiplist 等正式结构。
+
+> **注意**：这些键目前可被解析（config 结构体已有对应字段），但编码切换逻辑尚未读取
+> 配置值——切换阈值当前为硬编码默认值（`internal/object/encoding.go:281` 有
+> `// TODO: Check config thresholds`，详见[学习文档第 04 章](../learn/04-datatypes.md)）。
+> 修改这些键暂不会改变运行时行为。
 
 | 键 | 取值 | 默认 | 作用 |
 |---|---|---|---|
