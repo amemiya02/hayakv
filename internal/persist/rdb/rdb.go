@@ -24,7 +24,10 @@ const (
 	typeZSet   = 3 // v1: score serialized as an ASCII string
 	typeHash   = 4
 
-	typeStream = 20 // hayakv-internal stream type (not cross-loadable with Redis)
+	// typeStream is a private byte (was 20; moved to free RDB_TYPE_SET_LISTPACK=20).
+	// Old hayakv RDBs containing streams are not forward-compatible — acceptable for
+	// this learning project (no production data).
+	typeStream = 200
 )
 
 // Modern Redis 8 encoding type bytes (decode-only; hayakv still writes 0-4).
@@ -34,6 +37,7 @@ const (
 	typeHashListpack   = 16 // RDB_TYPE_HASH_LISTPACK
 	typeZSetListpack   = 17 // RDB_TYPE_ZSET_LISTPACK
 	typeListQuicklist2 = 18 // RDB_TYPE_LIST_QUICKLIST_2
+	typeSetListpack    = 20 // RDB_TYPE_SET_LISTPACK (freed from the old stream byte)
 )
 
 // Length-encoding tags (top two bits of the first length byte).

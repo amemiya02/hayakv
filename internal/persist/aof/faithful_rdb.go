@@ -218,7 +218,7 @@ func LoadEntriesAsCommands(e rdb.Entry) [][]CmdLine {
 			args = append(args, []byte(strconv.FormatFloat(m.Score, 'g', -1, 64)), m.Member)
 		}
 		cmds = append(cmds, args)
-	case rdb.EntryType(20): // stream (hayakv-internal typeStream)
+	case rdb.EntryType(200): // stream (hayakv-internal typeStream, private byte)
 		cmds = streamEntriesToCommands(string(key), e.StreamVal)
 	}
 	if e.ExpireMS != 0 && len(cmds) > 0 {

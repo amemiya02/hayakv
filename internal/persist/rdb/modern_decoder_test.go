@@ -127,3 +127,16 @@ func TestDecodeQuicklist2PlainAndPacked(t *testing.T) {
 		t.Fatalf("ListVal = %q, want %q", e.ListVal, want)
 	}
 }
+
+func TestDecodeSetListpack(t *testing.T) {
+	// listpack ["x","y"]
+	lp := []byte{0x0D, 0, 0, 0, 0x02, 0x00, 0x81, 'x', 0x02, 0x81, 'y', 0x02, 0xFF}
+	e := decodeOne(t, modernFixture(typeSetListpack, "s", rdbStr(lp)))
+	if e.Type != typeSet {
+		t.Fatalf("Type = %d, want typeSet(%d)", e.Type, typeSet)
+	}
+	want := [][]byte{[]byte("x"), []byte("y")}
+	if !reflect.DeepEqual(e.SetVal, want) {
+		t.Fatalf("SetVal = %q, want %q", e.SetVal, want)
+	}
+}

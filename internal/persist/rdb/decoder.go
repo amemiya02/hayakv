@@ -239,8 +239,20 @@ func (d *Decoder) readObject(typeByte byte, db int, expireMS uint64) (Entry, err
 		}
 		e.StreamVal = sd
 		return e, nil
+	case typeSetListpack:
+		blob, err := d.r.readString()
+		if err != nil {
+			return e, err
+		}
+		members, err := parseListpack(blob)
+		if err != nil {
+			return e, err
+		}
+		e.Type = typeSet
+		e.SetVal = members
+		return e, nil
 	default:
-		return e, fmt.Errorf("rdb: unsupported value type %d (listpack/intset/quicklist variants are not supported)", typeByte)
+		return e, fmt.Errorf("rdb: unsupported value type %d (ziplist/zipmap/module/LZF-compressed types are out of scope)", typeByte)
 	}
 }
 
