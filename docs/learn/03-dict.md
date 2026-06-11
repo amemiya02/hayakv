@@ -262,7 +262,7 @@ key 通过 FNV-32（`fnv32`，`concurrent.go:72`）散列到对应分片，操�
 这一设计适合多 goroutine 并发写的场景（`engine=shardmap` + `net=goroutine`），但
 与 Redis 单线程模型的语义有差距：同一时刻可以有多个分片持锁并发写入，SCAN 遍历顺序
 与 Redis 不一致，事务语义也更复杂（`RWLocks`/`RWUnLocks` 需要全局排好序批量加锁
-以避免死锁，见 `concurrent.go:387`）。
+以避免死锁，见 `concurrent.go:407`）。
 
 ### 3.5 factory.go：全局工厂与 seam
 
