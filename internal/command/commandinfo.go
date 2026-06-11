@@ -34,6 +34,8 @@ func execCommand(args [][]byte) redis.Reply {
 		return getCommands(args[1:])
 	} else if subCommand == "count" {
 		return protocol.MakeIntReply(int64(len(cmdTable)))
+	} else if subCommand == "docs" {
+		return getCommandDocs(args[1:])
 	} else if subCommand == "getkeys" {
 		if len(args) < 2 {
 			return protocol.MakeErrReply("wrong number of arguments for 'command|" + subCommand + "'")
