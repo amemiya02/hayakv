@@ -94,12 +94,12 @@ redis-cli -p 6399 ping       # PONG
 
 ## ENCODINGS — 紧凑编码阈值
 
-阈值语义与真实 Redis 8 一致：超过阈值即转换为 hashtable/skiplist 等正式结构。
-
-> **注意**：这些键目前可被解析（config 结构体已有对应字段），但编码切换逻辑尚未读取
-> 配置值——切换阈值当前为硬编码默认值（`internal/object/encoding.go:281` 有
-> `// TODO: Check config thresholds`，详见[学习文档第 04 章](../learn/04-datatypes.md)）。
-> 修改这些键暂不会改变运行时行为。
+阈值语义与真实 Redis 8 一致：超过条目数阈值，或向 hash/set/zset 写入超过
+`*-max-listpack-value` 长度的单值，即转换为 hashtable/skiplist 等正式结构；
+list 没有单值长度维度（与真实 Redis 行为一致）。这些键在启动时生效，也支持
+`CONFIG SET` 运行时修改（见下文运行时语义一节）。实现：阈值集中在
+`internal/object/thresholds.go`，由 `server.NewStorageEngine` 在启动时从配置
+注入；详解见[学习文档第 04 章](../learn/04-datatypes.md)。
 
 | 键 | 取值 | 默认 | 作用 |
 |---|---|---|---|
@@ -179,7 +179,7 @@ hayakv 支持 `CONFIG GET`、`CONFIG SET`、`CONFIG REWRITE` 和 `CONFIG RESETST
 
 ### 可在运行时动态修改的键（CONFIG SET）
 
-以下键支持 `CONFIG SET`，修改立即生效，无需重启（`config_cmd.go:103-164`）：
+以下键支持 `CONFIG SET`，修改立即生效，无需重启（`config_cmd.go:108-190`）：
 
 | 键 | 备注 |
 |---|---|
@@ -191,8 +191,9 @@ hayakv 支持 `CONFIG GET`、`CONFIG SET`、`CONFIG REWRITE` 和 `CONFIG RESETST
 | `notify-keyspace-events` | 标志字符串 |
 | `slowlog-log-slower-than` | 负数禁用；同步更新内存中的 slowlog 阈值 |
 | `slowlog-max-len` | 须为正整数；同步更新 slowlog 缓冲区容量 |
+| `hash-max-listpack-entries` 等 8 个编码阈值键 | 须为正整数；修改即时作用于后续写入（已转换 key 的编码不会回退），经 `ApplyEncodingThresholds` 推入 object 包 |
 
-**CONFIG GET** 支持 glob 通配符（如 `CONFIG GET maxmemory*`、`CONFIG GET *`），可查询的键集合在 `configGet` 函数中硬编码（`config_cmd.go:50-72`）。
+**CONFIG GET** 支持 glob 通配符（如 `CONFIG GET maxmemory*`、`CONFIG GET *`），可查询的键集合在 `configGet` 函数中硬编码（`config_cmd.go:51-77`），含全部 8 个编码阈值键。
 
 **启动时专有键**：`net`、`engine`、`proto-max`、`bind`、`port`、`databases`、`cluster-*`、`tls-*`、`unixsocket`、`dir` 等不支持 `CONFIG SET`——修改须编辑配置文件后重启。未知键的 `CONFIG SET` 请求会被静默接受并返回 `OK`（向 Redis 兼容性对齐）。
 

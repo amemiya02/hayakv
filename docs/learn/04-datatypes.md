@@ -301,9 +301,20 @@ list-max-listpack-size    128
 
 完整说明见 [`../dev/config.md`](../dev/config.md) 的 ENCODINGS 一节。
 
-当前 hayakv 的阈值**硬编码**在 `internal/object/encoding.go` 中，
-`// TODO: Check config thresholds` 注释（`encoding.go:281`）标明了后续接入
-动态配置的扩展点。
+阈值的运行机制：`internal/object/thresholds.go` 维护一组原子可替换的
+`EncodingThresholds`（默认值与真实 Redis 8 相同），启动时由
+`server.NewStorageEngine` 从配置注入；`CONFIG SET hash-max-listpack-entries`
+等运行时修改也会即时生效（`internal/command/config_cmd.go` 的
+`ApplyEncodingThresholds`）。各转换点统一经 `object.Thresholds()` 读取当前值。
+除条目数外，hash/set/zset 的 `*-max-listpack-value` 单值长度维度（默认 64
+字节）同样已生效——写入长值会直接翻转编码；list 没有这个维度，与真实
+Redis 一致。
+
+> **历史注记**：本章初版写作时，这些阈值还是 `encoding.go` 里的硬编码字面量
+> （带 `// TODO: Check config thresholds`），且单值长度维度完全缺失。这两处
+> 缺口都是写作本章做实验时暴露的，随后接线修复，并以差分场景
+> `encoding_value_thresholds`、`config_set_encoding_threshold`
+> （`test/diff/corpus_variants_test.go`）对真实 Redis 8.4 验证。
 
 ### 3.7 差分语料佐证
 

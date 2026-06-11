@@ -87,6 +87,7 @@ func (h *Hash) Put(field string, value interface{}) int {
 		if found {
 			// Update existing field - need to rebuild listpack
 			h.rebuildListpackWithUpdate(field, value)
+			h.maybeConvertToHashtable(field, value)
 			return 0
 		}
 
@@ -102,7 +103,7 @@ func (h *Hash) Put(field string, value interface{}) int {
 		}
 
 		// Check if we should convert to hashtable
-		h.maybeConvertToHashtable()
+		h.maybeConvertToHashtable(field, value)
 		return 1
 	}
 
@@ -140,7 +141,7 @@ func (h *Hash) PutIfAbsent(field string, value interface{}) int {
 		}
 
 		// Check if we should convert to hashtable
-		h.maybeConvertToHashtable()
+		h.maybeConvertToHashtable(field, value)
 		return 1
 	}
 
@@ -276,11 +277,14 @@ func (h *Hash) rebuildListpackWithUpdate(field string, value interface{}) {
 	h.listpack = newLp
 }
 
-// maybeConvertToHashtable checks if we should convert from listpack to hashtable
-func (h *Hash) maybeConvertToHashtable() {
-	// TODO: Check config thresholds
-	// For now, convert if we have more than 128 fields
-	if h.listpack.Len()/2 > 128 {
+// maybeConvertToHashtable converts from listpack to hashtable when the entry
+// count or the just-written field/value length exceeds the configured
+// thresholds (hash-max-listpack-entries / hash-max-listpack-value).
+func (h *Hash) maybeConvertToHashtable(field string, value interface{}) {
+	t := Thresholds()
+	if h.listpack.Len()/2 > t.HashMaxListpackEntries ||
+		len(field) > t.HashMaxListpackValue ||
+		elemLen(value) > t.HashMaxListpackValue {
 		h.convertToHashtable()
 	}
 }
@@ -347,10 +351,11 @@ func (s *Set) Add(member string) int {
 		if v, ok := isInt(member); ok {
 			if s.intset.Add(v) {
 				// Check if we should convert to listpack
-				if s.intset.Len() > 512 {
+				t := Thresholds()
+				if s.intset.Len() > t.SetMaxIntsetEntries {
 					s.convertToListpack()
 					// After conversion, check if we should convert to hashtable
-					if s.listpack.Len() > 128 {
+					if s.listpack.Len() > t.SetMaxListpackEntries {
 						s.convertToHashtable()
 					}
 				}
@@ -377,10 +382,15 @@ func (s *Set) Add(member string) int {
 			return 0
 		}
 
+		t := Thresholds()
+		if len(member) > t.SetMaxListpackValue {
+			// A member longer than set-max-listpack-value forces hashtable.
+			s.convertToHashtable()
+			return s.hashtable.Put(member, nil)
+		}
 		s.listpack.AppendStr(member)
 		// Check if we should convert to hashtable
-		// Redis default: set-max-listpack-entries 128
-		if s.listpack.Len() > 128 {
+		if s.listpack.Len() > t.SetMaxListpackEntries {
 			s.convertToHashtable()
 		}
 		return 1
@@ -662,12 +672,19 @@ func (z *ZSet) Add(member string, score float64) bool {
 			return false
 		}
 
+		t := Thresholds()
+		if len(member) > t.ZSetMaxListpackValue {
+			// A member longer than zset-max-listpack-value forces skiplist.
+			z.convertToSkiplist()
+			return z.skiplist.Add(member, score)
+		}
+
 		// Add new member-score pair
 		z.listpack.AppendStr(member)
 		z.listpack.AppendStr(formatFloat(score))
 
 		// Check if we should convert to skiplist
-		if z.listpack.Len()/2 > 128 {
+		if z.listpack.Len()/2 > t.ZSetMaxListpackEntries {
 			z.convertToSkiplist()
 		}
 		return true
@@ -1261,7 +1278,7 @@ func (l *List) Add(val interface{}) {
 		}
 
 		// Check if we should convert to quicklist
-		if l.listpack.Len() > 128 {
+		if l.listpack.Len() > Thresholds().ListMaxListpackSize {
 			l.convertToQuicklist()
 		}
 		return
@@ -1370,7 +1387,7 @@ func (l *List) Insert(index int, val interface{}) {
 		}
 		l.listpack = newLp
 		// Check if we should convert to quicklist
-		if l.listpack.Len() > 128 {
+		if l.listpack.Len() > Thresholds().ListMaxListpackSize {
 			l.convertToQuicklist()
 		}
 		return

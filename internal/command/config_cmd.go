@@ -7,6 +7,7 @@ import (
 	"github.com/amemiya02/hayakv/config"
 	"github.com/amemiya02/hayakv/internal/iface/redis"
 	"github.com/amemiya02/hayakv/internal/lib/wildcard"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/proto/resp2/protocol"
 )
 
@@ -57,8 +58,12 @@ func configGet(param string) [][]byte {
 		"save":                      func() string { return "" },
 		"list-max-listpack-size":    func() string { return strconv.Itoa(config.Properties.ListMaxListpackSize) },
 		"hash-max-listpack-entries": func() string { return strconv.Itoa(config.Properties.HashMaxListpackEntries) },
+		"hash-max-listpack-value":   func() string { return strconv.Itoa(config.Properties.HashMaxListpackValue) },
 		"set-max-intset-entries":    func() string { return strconv.Itoa(config.Properties.SetMaxIntsetEntries) },
+		"set-max-listpack-entries":  func() string { return strconv.Itoa(config.Properties.SetMaxListpackEntries) },
+		"set-max-listpack-value":    func() string { return strconv.Itoa(config.Properties.SetMaxListpackValue) },
 		"zset-max-listpack-entries": func() string { return strconv.Itoa(config.Properties.ZSetMaxListpackEntries) },
+		"zset-max-listpack-value":   func() string { return strconv.Itoa(config.Properties.ZSetMaxListpackValue) },
 		"notify-keyspace-events":    func() string { return config.Properties.NotifyKeyspaceEvents },
 		"latency-monitor-threshold": func() string { return "0" },
 		"slowlog-log-slower-than":   func() string { return strconv.FormatInt(config.Properties.SlowLogSlowerThan, 10) },
@@ -157,11 +162,53 @@ func (s *Server) configSet(param, value string) redis.Reply {
 		if s != nil && s.slogLogger != nil {
 			s.slogLogger.SetMaxLen(n)
 		}
+	case "hash-max-listpack-entries", "hash-max-listpack-value",
+		"set-max-intset-entries", "set-max-listpack-entries", "set-max-listpack-value",
+		"zset-max-listpack-entries", "zset-max-listpack-value", "list-max-listpack-size":
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return protocol.MakeErrReply("ERR Invalid argument '" + value + "' for CONFIG SET '" + param + "'")
+		}
+		switch param {
+		case "hash-max-listpack-entries":
+			config.Properties.HashMaxListpackEntries = n
+		case "hash-max-listpack-value":
+			config.Properties.HashMaxListpackValue = n
+		case "set-max-intset-entries":
+			config.Properties.SetMaxIntsetEntries = n
+		case "set-max-listpack-entries":
+			config.Properties.SetMaxListpackEntries = n
+		case "set-max-listpack-value":
+			config.Properties.SetMaxListpackValue = n
+		case "zset-max-listpack-entries":
+			config.Properties.ZSetMaxListpackEntries = n
+		case "zset-max-listpack-value":
+			config.Properties.ZSetMaxListpackValue = n
+		case "list-max-listpack-size":
+			config.Properties.ListMaxListpackSize = n
+		}
+		ApplyEncodingThresholds()
 	default:
 		// Unknown-but-tolerated: Redis accepts many params we don't model.
 		return protocol.MakeOkReply()
 	}
 	return protocol.MakeOkReply()
+}
+
+// ApplyEncodingThresholds pushes the current *-max-listpack-* config values
+// into the object package, where encoding conversions read them. Called at
+// startup (via server.NewStorageEngine) and after CONFIG SET.
+func ApplyEncodingThresholds() {
+	object.SetEncodingThresholds(object.EncodingThresholds{
+		HashMaxListpackEntries: config.Properties.HashMaxListpackEntries,
+		HashMaxListpackValue:   config.Properties.HashMaxListpackValue,
+		SetMaxIntsetEntries:    config.Properties.SetMaxIntsetEntries,
+		SetMaxListpackEntries:  config.Properties.SetMaxListpackEntries,
+		SetMaxListpackValue:    config.Properties.SetMaxListpackValue,
+		ZSetMaxListpackEntries: config.Properties.ZSetMaxListpackEntries,
+		ZSetMaxListpackValue:   config.Properties.ZSetMaxListpackValue,
+		ListMaxListpackSize:    config.Properties.ListMaxListpackSize,
+	})
 }
 
 func validPolicy(v string) bool {

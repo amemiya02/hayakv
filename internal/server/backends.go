@@ -13,6 +13,7 @@ import (
 	ifaceDB "github.com/amemiya02/hayakv/internal/iface/database"
 	"github.com/amemiya02/hayakv/internal/net/eventloop"
 	goroutinenet "github.com/amemiya02/hayakv/internal/net/goroutine"
+	"github.com/amemiya02/hayakv/internal/object"
 	"github.com/amemiya02/hayakv/internal/proto/resp2"
 	"github.com/amemiya02/hayakv/internal/proto/resp3"
 	"github.com/amemiya02/hayakv/internal/rediscluster"
@@ -55,6 +56,18 @@ func NewScriptEngine(cfg *config.ServerProperties, inv iface.ScriptInvoker) ifac
 
 func NewStorageEngine(cfg *config.ServerProperties) (iface.StorageEngine, error) {
 	NormalizeBackends(cfg)
+	// Push the configured *-max-listpack-* thresholds into the object
+	// package, where encoding conversions read them.
+	object.SetEncodingThresholds(object.EncodingThresholds{
+		HashMaxListpackEntries: cfg.HashMaxListpackEntries,
+		HashMaxListpackValue:   cfg.HashMaxListpackValue,
+		SetMaxIntsetEntries:    cfg.SetMaxIntsetEntries,
+		SetMaxListpackEntries:  cfg.SetMaxListpackEntries,
+		SetMaxListpackValue:    cfg.SetMaxListpackValue,
+		ZSetMaxListpackEntries: cfg.ZSetMaxListpackEntries,
+		ZSetMaxListpackValue:   cfg.ZSetMaxListpackValue,
+		ListMaxListpackSize:    cfg.ListMaxListpackSize,
+	})
 	switch cfg.EngineBackend {
 	case EngineShardMap:
 		dict.SetEngine("shardmap")
