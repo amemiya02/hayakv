@@ -27,7 +27,7 @@ func TestEncoderHeaderAndEOF(t *testing.T) {
 		t.Fatalf("WriteEnd: %v", err)
 	}
 	b := buf.Bytes()
-	if !bytes.HasPrefix(b, []byte("REDIS0012")) {
+	if !bytes.HasPrefix(b, []byte("REDIS0011")) {
 		t.Fatalf("missing header, got %q", b[:9])
 	}
 	// last 9 bytes = 0xFF + 8-byte crc; the byte before the crc trailer is the EOF opcode.

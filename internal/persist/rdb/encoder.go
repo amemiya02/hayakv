@@ -15,9 +15,12 @@ type Encoder struct {
 // NewEncoder returns an Encoder writing to w.
 func NewEncoder(w io.Writer) *Encoder { return &Encoder{w: newWriter(w)} }
 
-// WriteHeader writes the "REDIS0012" magic (RDB version 12, matching Redis 8.x).
+// WriteHeader writes the "REDIS0011" magic. hayakv targets Redis 8.x, whose
+// stable RDB_VERSION is 11; real redis-server rejects any version above what it
+// supports and would load an empty dataset (every key reads back nil). The
+// decoder still accepts up to Version (12), so reading newer files is unaffected.
 func (e *Encoder) WriteHeader() error {
-	return e.w.writeBytes([]byte("REDIS0012"))
+	return e.w.writeBytes([]byte("REDIS0011"))
 }
 
 // WriteAux writes a 0xFA auxiliary key/value field.

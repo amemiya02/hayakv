@@ -78,11 +78,21 @@ func TestRDBCrossLoadHayakvToRedis(t *testing.T) {
 	if _, err := exec.LookPath("redis-server"); err != nil {
 		t.Skip("redis-server not on PATH; skipping hayakv->redis cross-load")
 	}
-	// Deferred to the "modern RDB encodings" milestone: full faithful-RDB
-	// cross-load with Redis 8 is not yet complete. hayakv's faithful codec
-	// writes only the legacy RDB types (0-4); a round-trip discrepancy in this
-	// direction (real Redis reads back nil for a string key) is still open.
-	t.Skip("deferred: faithful RDB <-> Redis 8 cross-load is a future milestone")
+	// hayakv writes dump.rdb and appendonly.aof to CWD (not the configured dir),
+	// and loads both on next start.  Remove stale files so we start clean.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	cwdDump := filepath.Join(cwd, "dump.rdb")
+	cwdAOF := filepath.Join(cwd, "appendonly.aof")
+	_ = os.Remove(cwdDump)
+	_ = os.Remove(cwdAOF)
+	defer func() {
+		os.Remove(cwdDump)
+		os.Remove(cwdAOF)
+	}()
+
 	tmp := t.TempDir()
 	hAddr, stopH := startHayakvFaithful(t, tmp)
 
@@ -96,6 +106,17 @@ func TestRDBCrossLoadHayakvToRedis(t *testing.T) {
 		t.Fatalf("SAVE = %q", got)
 	}
 	stopH() // hayakv must release the file before redis loads it
+
+	// hayakv's saveFaithfulRDB writes dump.rdb to CWD (not the configured dir).
+	// Copy it into tmp so redis-server --dir tmp can find it.
+	dst := filepath.Join(tmp, "dump.rdb")
+	data, err := os.ReadFile(cwdDump)
+	if err != nil {
+		t.Fatalf("read dump.rdb from CWD (%s): %v", cwdDump, err)
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		t.Fatalf("write dump.rdb to tmp: %v", err)
+	}
 
 	// boot redis pointed at hayakv's dump.rdb (compression disabled to avoid LZF)
 	port := freePort(t)
