@@ -153,6 +153,77 @@ func (d *Decoder) readObject(typeByte byte, db int, expireMS uint64) (Entry, err
 			e.ZSetVal = append(e.ZSetVal, ZSetMember{Member: m, Score: score})
 		}
 		return e, nil
+	case typeZSet2:
+		n, _, err := d.r.readLen()
+		if err != nil {
+			return e, err
+		}
+		e.Type = typeZSet
+		e.ZSetVal = make([]ZSetMember, 0, n)
+		for i := uint64(0); i < n; i++ {
+			m, err := d.r.readString()
+			if err != nil {
+				return e, err
+			}
+			score, err := d.readDouble()
+			if err != nil {
+				return e, err
+			}
+			e.ZSetVal = append(e.ZSetVal, ZSetMember{Member: m, Score: score})
+		}
+		return e, nil
+	case typeSetIntset:
+		blob, err := d.r.readString()
+		if err != nil {
+			return e, err
+		}
+		members, err := parseIntset(blob)
+		if err != nil {
+			return e, err
+		}
+		e.Type = typeSet
+		e.SetVal = members
+		return e, nil
+	case typeHashListpack:
+		blob, err := d.r.readString()
+		if err != nil {
+			return e, err
+		}
+		elems, err := parseListpack(blob)
+		if err != nil {
+			return e, err
+		}
+		if len(elems)%2 != 0 {
+			return e, fmt.Errorf("rdb: hash listpack has odd element count %d", len(elems))
+		}
+		e.Type = typeHash
+		e.HashVal = make(map[string][]byte, len(elems)/2)
+		for i := 0; i < len(elems); i += 2 {
+			e.HashVal[string(elems[i])] = elems[i+1]
+		}
+		return e, nil
+	case typeZSetListpack:
+		blob, err := d.r.readString()
+		if err != nil {
+			return e, err
+		}
+		elems, err := parseListpack(blob)
+		if err != nil {
+			return e, err
+		}
+		if len(elems)%2 != 0 {
+			return e, fmt.Errorf("rdb: zset listpack has odd element count %d", len(elems))
+		}
+		e.Type = typeZSet
+		e.ZSetVal = make([]ZSetMember, 0, len(elems)/2)
+		for i := 0; i < len(elems); i += 2 {
+			score, err := strconv.ParseFloat(string(elems[i+1]), 64)
+			if err != nil {
+				return e, fmt.Errorf("rdb: bad zset listpack score %q: %w", elems[i+1], err)
+			}
+			e.ZSetVal = append(e.ZSetVal, ZSetMember{Member: elems[i], Score: score})
+		}
+		return e, nil
 	case typeStream:
 		sd, err := d.readStreamData()
 		if err != nil {

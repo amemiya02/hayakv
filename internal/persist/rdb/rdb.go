@@ -27,6 +27,14 @@ const (
 	typeStream = 20 // hayakv-internal stream type (not cross-loadable with Redis)
 )
 
+// Modern Redis 8 encoding type bytes (decode-only; hayakv still writes 0-4).
+const (
+	typeZSet2        = 5  // RDB_TYPE_ZSET_2: score is an 8-byte binary double
+	typeSetIntset    = 11 // RDB_TYPE_SET_INTSET
+	typeHashListpack = 16 // RDB_TYPE_HASH_LISTPACK
+	typeZSetListpack = 17 // RDB_TYPE_ZSET_LISTPACK
+)
+
 // Length-encoding tags (top two bits of the first length byte).
 const (
 	len6Bit    = 0 // 00xxxxxx
