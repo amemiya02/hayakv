@@ -24,7 +24,7 @@ Redis 逐字节回复一致。这套文档以 hayakv 代码为教材，面向想
 | 05 | [网络模型：goroutine vs 单线程事件循环](05-event-loop.md) |
 | 06 | [采样式过期与 maxmemory 淘汰](06-expire-evict.md) |
 | 07 | [RDB、multi-part AOF 与混合持久化](07-persistence.md) |
-| 08 | PSYNC 复制（规划中） |
+| 08 | [PSYNC 复制](08-replication.md) |
 | 09 | Redis Cluster：slot、MOVED/ASK、gossip（规划中） |
 | 10 | 差分测试：如何验证「逐字节一致」（规划中） |
 
