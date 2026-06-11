@@ -59,7 +59,8 @@ const (
 	encLZF   = 3
 )
 
-// Version is the RDB format hayakv writes (aligned with Redis 8.x).
+// Version is the highest RDB version the decoder accepts (aligned with Redis 8.x).
+// The encoder writes v11 (see Encoder.WriteHeader) for compatibility with real Redis.
 const Version = 12
 
 // EntryType mirrors the value type byte for decoded entries.

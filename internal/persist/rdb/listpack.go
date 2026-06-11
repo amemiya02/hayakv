@@ -137,8 +137,8 @@ func parseIntset(blob []byte) ([][]byte, error) {
 	if enc != 2 && enc != 4 && enc != 8 {
 		return nil, fmt.Errorf("rdb: intset bad encoding %d", enc)
 	}
-	need := 8 + int(length)*int(enc)
-	if need > len(blob) {
+	need := 8 + int64(length)*int64(enc)
+	if need > int64(len(blob)) {
 		return nil, fmt.Errorf("rdb: intset length %d*%d overflows blob %d", length, enc, len(blob))
 	}
 	out := make([][]byte, 0, length)

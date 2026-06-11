@@ -1,6 +1,7 @@
 package rdb
 
 import (
+	"encoding/binary"
 	"reflect"
 	"testing"
 )
@@ -52,6 +53,41 @@ func TestParseListpack(t *testing.T) {
 				t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseListpackInt24(t *testing.T) {
+	// int24 value 100000: encoding=0xF2, data=100000 LE 3 bytes, backlen=0x04
+	// 100000 = 0x0186A0 -> bytes A0 86 01
+	// total = 6(header) + 1(enc) + 3(data) + 1(backlen) + 1(terminator) = 12
+	blob := []byte{0x0C, 0x00, 0x00, 0x00, 0x01, 0x00, 0xF2, 0xA0, 0x86, 0x01, 0x04, 0xFF}
+	got, err := parseListpack(blob)
+	if err != nil {
+		t.Fatalf("parseListpack: %v", err)
+	}
+	want := [][]byte{[]byte("100000")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestParseListpackInt64(t *testing.T) {
+	// int64 value -123456789012345: encoding=0xF4, data LE 8 bytes, backlen=0x09
+	var b [8]byte
+	v := int64(-123456789012345)
+	binary.LittleEndian.PutUint64(b[:], uint64(v))
+	blob := []byte{0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0xF4,
+		b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+		0x09, 0xFF}
+	// Fix total-bytes: 6 header + 1(enc) + 8(data) + 1(backlen) + 1(terminator) = 17
+	blob[0] = 0x11
+	got, err := parseListpack(blob)
+	if err != nil {
+		t.Fatalf("parseListpack: %v", err)
+	}
+	want := [][]byte{[]byte("-123456789012345")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
