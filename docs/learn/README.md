@@ -17,7 +17,7 @@ Redis 逐字节回复一致。这套文档以 hayakv 代码为教材，面向想
 
 | 章 | 主题 |
 |---|---|
-| 01 | RESP2/RESP3 协议与 HELLO 协商（规划中） |
+| 01 | [RESP2/RESP3 协议与 HELLO 协商](01-resp.md) |
 | 02 | Robj 与对象编码（规划中） |
 | 03 | dict 与增量 rehash（规划中） |
 | 04 | list/hash/set/zset 的实现与编码切换（规划中） |
