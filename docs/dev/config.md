@@ -65,6 +65,8 @@ redis-cli -p 6399 ping       # PONG
 
 ## PERSISTENCE — 持久化
 
+详见[学习文档第 07 章](../learn/07-persistence.md)。
+
 | 键 | 取值 | 默认 | 作用 |
 |---|---|---|---|
 | `appendonly` | `yes` \| `no` | `no` | 启用 AOF 持久化；RDB 快照通过 AOF rewrite 生成，复制也依赖 AOF |
