@@ -108,26 +108,30 @@ func splitKV(s string) []string {
 	return result
 }
 
-// in-scope directory globs. Files matching any of these are considered
-// in-scope unless they also match an exclusion pattern.
+// in-scope directory globs, relative to REDIS_TCL_DIR (the redis *tests* dir,
+// e.g. /tmp/redis/tests). Files matching any of these are considered in-scope
+// unless they also match an exclusion pattern.
 var inScopeGlobs = []string{
-	"tests/unit/type/*.tcl",
-	"tests/unit/*.tcl",
-	"tests/integration/*.tcl",
+	"unit/type/*.tcl",
+	"unit/*.tcl",
+	"integration/*.tcl",
 }
 
-// excludedDirs are entire directories skipped during discovery.
+// excludedDirs are entire directories skipped during discovery, relative to
+// REDIS_TCL_DIR (the redis tests dir).
 var excludedDirs = []string{
-	"tests/unit/moduleapi",
-	"tests/sentinel",
-	"tests/cluster",
-	"tests/support",
-	"tests/tmp",
+	"unit/moduleapi",
+	"sentinel",
+	"cluster",
+	"support",
+	"tmp",
 }
 
 // discoverInScopeFiles walks the upstream redis tests directory and returns
-// relative paths (using "/" separators) for every .tcl file that matches
-// the in-scope globs and is not in an excluded directory.
+// repo-relative paths (with the "tests/" prefix, matching manifest.yaml keys,
+// using "/" separators) for every .tcl file that matches the in-scope globs
+// and is not in an excluded directory. redisTestsDir is the redis *tests* dir
+// (REDIS_TCL_DIR), so the globs are joined without a leading "tests/".
 func discoverInScopeFiles(t *testing.T, redisTestsDir string) []string {
 	t.Helper()
 
@@ -157,7 +161,9 @@ func discoverInScopeFiles(t *testing.T, redisTestsDir string) []string {
 				continue
 			}
 
-			files = append(files, rel)
+			// Manifest keys are repo-relative (include the "tests/" prefix);
+			// redisTestsDir is the tests dir, so re-add it for the key.
+			files = append(files, "tests/"+rel)
 		}
 	}
 
@@ -216,7 +222,8 @@ func TestTCLManifestCoversEveryInScopeFile(t *testing.T) {
 	// Also verify every manifest entry corresponds to an actual file.
 	// This catches stale entries pointing at files that no longer exist.
 	for f := range m {
-		abs := filepath.Join(dir, f)
+		// Strip the repo-relative "tests/" prefix: dir is the redis tests dir.
+		abs := filepath.Join(dir, strings.TrimPrefix(f, "tests/"))
 		if _, err := os.Stat(abs); os.IsNotExist(err) {
 			fmt.Printf("WARNING: manifest entry %s does not exist in redis tests (stale?)\n", f)
 		}
